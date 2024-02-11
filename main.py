@@ -58,49 +58,59 @@ def main():
         for i in range(num_particles - 1):
             j = i + 1
             while j < num_particles and abs(particles[particles_x[j]].x - particles[particles_x[i]].x) < 5:
+                particle1 = particles[particles_x[i]]
+                particle2 = particles[particles_x[j]]
                 # check if one of the particles is a walker
-                if not (particles[particles_x[i]].walker and particles[particles_x[j]].walker) and (particles[particles_x[i]].walker or particles[particles_x[j]].walker):
+                if not (particle1.walker and particle2.walker) and (not particle1.walker or not particle2.walker):
                     pygame.draw.line(
                         screen,
                         gray,
-                        (particles[particles_x[i]].x, particles[particles_x[i]].y),
-                        (particles[particles_x[j]].x, particles[particles_x[j]].y),
+                        (particle1.x, particle1.y),
+                        (particle2.x, particle2.y),
                         1,
                     )
+                found = False
                 # check if the two particles are close in the y direction by while looping starting around the y_index
-                k = particles[particles_x[i]].y_index + 1
-                while k < num_particles and abs(particles[particles_y[k]].y - particles[particles_x[i]].y) <= 5:
+                k = particle1.y_index + 1
+                while not found and k < num_particles and abs(particles[particles_y[k]].y - particle1.y) <= 20:
                     # check if both particles are walkers
-                    if not (particles[particles_x[i]].walker and particles[particles_y[k]].walker) and (particles[particles_x[i]].walker or particles[particles_x[j]].walker):
-                        pygame.draw.line(
-                            screen,
-                            yellow,
-                            (particles[particles_x[i]].x, particles[particles_x[i]].y),
-                            (particles[particles_y[k]].x, particles[particles_y[k]].y),
-                            2,
-                        )
+                    if particle2.id == particles[particles_y[k]].id:
+                        if not (particle1.walker and particles[particles_y[k]].walker) and (
+                            particle1.walker or particles[particles_y[k]].walker
+                        ):
+                            pygame.draw.line(
+                                screen,
+                                yellow,
+                                (particle1.x, particle1.y),
+                                (particles[particles_y[k]].x, particles[particles_y[k]].y),
+                                2,
+                            )
+                        print(particle1.id, particles[particles_y[k]].id)
+                        found = True
                     # collisions.add((particles_x[i], particles_x[j]))
                     # particles[particles_x[i]].walker = False
                     # particles[particles_y[k]].walker = False
                     k += 1
 
-                k = particles[particles_x[i]].y_index - 1
-                while k >= 0 and abs(particles[particles_y[k]].y - particles[particles_x[i]].y) <= 5:
-                    if particles[particles_x[i]].id == particles[particles_y[k]].id:
-                        print(particles[particles_x[i]].id, particles[particles_y[k]].id)
-                        if not (particles[particles_x[i]].walker and particles[particles_y[k]].walker):
+                k = particle1.y_index - 1
+                while not found and k >= 0 and abs(particles[particles_y[k]].y - particle1.y) <= 20:
+                    if particle2.id == particles[particles_y[k]].id:
+                        if not (particle1.walker and particles[particles_y[k]].walker) and (
+                            particle1.walker or particles[particles_y[k]].walker
+                        ):
                             pygame.draw.line(
                                 screen,
                                 yellow,
-                                (particles[particles_x[i]].x, particles[particles_x[i]].y),
+                                (particle1.x, particle1.y),
                                 (particles[particles_y[k]].x, particles[particles_y[k]].y),
                                 2,
                             )
+                        found = True
+                        print(particle1.id, particles[particles_y[k]].id)
                         # collisions.add((particles_x[i], particles_x[j]))
                         # particles[particles_x[i]].walker = False
                         # particles[particles_y[k]].walker = False
                     k -= 1
-
                 j += 1
 
         for _, particle in particles.items():
