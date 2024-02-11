@@ -61,7 +61,7 @@ def main():
                 particle1 = particles[particles_x[i]]
                 particle2 = particles[particles_x[j]]
                 # check if one of the particles is a walker
-                if not (particle1.walker and particle2.walker) and (not particle1.walker or not particle2.walker):
+                if (particle1.walker or particle2.walker) or not (not particle1.walker and not particle2.walker):
                     pygame.draw.line(
                         screen,
                         gray,
@@ -85,11 +85,11 @@ def main():
                                 (particles[particles_y[k]].x, particles[particles_y[k]].y),
                                 2,
                             )
-                        print(particle1.id, particles[particles_y[k]].id)
-                        found = True
-                    # collisions.add((particles_x[i], particles_x[j]))
-                    # particles[particles_x[i]].walker = False
-                    # particles[particles_y[k]].walker = False
+                            print(particle1.id, particles[particles_y[k]].id)
+                            found = True
+                            # collisions.add((particles_x[i], particles_x[j]))
+                            particle1.walker = False
+                            particle2.walker = False
                     k += 1
 
                 k = particle1.y_index - 1
@@ -105,11 +105,11 @@ def main():
                                 (particles[particles_y[k]].x, particles[particles_y[k]].y),
                                 2,
                             )
-                        found = True
-                        print(particle1.id, particles[particles_y[k]].id)
-                        # collisions.add((particles_x[i], particles_x[j]))
-                        # particles[particles_x[i]].walker = False
-                        # particles[particles_y[k]].walker = False
+                            found = True
+                            print(particle1.id, particles[particles_y[k]].id)
+                            # collisions.add((particles_x[i], particles_x[j]))
+                            particle1.walker = False
+                            particle2.walker = False
                     k -= 1
                 j += 1
 
