@@ -5,7 +5,7 @@ import random
 # Constants
 WIDTH = 800  # in pixels
 HEIGHT = 600
-num_particles = 100
+num_particles = 200
 gray = (200, 200, 200)
 black = (0, 0, 0)
 dark_red = (128, 0, 0)
@@ -57,7 +57,7 @@ def main():
         # loop through particles_x and flag for possible collision if two consecutive particles are too close
         for i in range(num_particles - 1):
             j = i + 1
-            while j < num_particles and abs(particles[particles_x[j]].x - particles[particles_x[i]].x) < 5:
+            while j < num_particles and abs(particles[particles_x[j]].x - particles[particles_x[i]].x) <= 7:
                 particle1 = particles[particles_x[i]]
                 particle2 = particles[particles_x[j]]
                 # check if one of the particles is a walker
@@ -72,7 +72,7 @@ def main():
                 found = False
                 # check if the two particles are close in the y direction by while looping starting around the y_index
                 k = particle1.y_index + 1
-                while not found and k < num_particles and abs(particles[particles_y[k]].y - particle1.y) <= 20:
+                while not found and k < num_particles and abs(particles[particles_y[k]].y - particle1.y) <= 7:
                     # check if both particles are walkers
                     if particle2.id == particles[particles_y[k]].id:
                         if not (particle1.walker and particles[particles_y[k]].walker) and (
@@ -93,7 +93,7 @@ def main():
                     k += 1
 
                 k = particle1.y_index - 1
-                while not found and k >= 0 and abs(particles[particles_y[k]].y - particle1.y) <= 20:
+                while not found and k >= 0 and abs(particles[particles_y[k]].y - particle1.y) <= 7:
                     if particle2.id == particles[particles_y[k]].id:
                         if not (particle1.walker and particles[particles_y[k]].walker) and (
                             particle1.walker or particles[particles_y[k]].walker
@@ -118,8 +118,8 @@ def main():
                 screen,
                 gray if particle.walker else dark_red,
                 (particle.x, particle.y),
-                3,
-                3,
+                5,
+                5,
             )
 
         pygame.display.update()
