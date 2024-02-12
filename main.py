@@ -5,7 +5,7 @@ import random
 # Constants
 WIDTH = 800  # in pixels
 HEIGHT = 600
-num_particles = 200
+num_particles = 100
 gray = (200, 200, 200)
 black = (0, 0, 0)
 dark_red = (128, 0, 0)
@@ -61,57 +61,56 @@ def main():
                 particle1 = particles[particles_x[i]]
                 particle2 = particles[particles_x[j]]
                 # check if one of the particles is a walker
-                if (particle1.walker or particle2.walker) or not (not particle1.walker and not particle2.walker):
-                    pygame.draw.line(
-                        screen,
-                        gray,
-                        (particle1.x, particle1.y),
-                        (particle2.x, particle2.y),
-                        1,
-                    )
                 found = False
+                j += 1
+                if (not particle1.walker and not particle2.walker) or (particle1.walker and particle2.walker):
+                    continue
+
+                pygame.draw.line(
+                    screen,
+                    gray,
+                    (particle1.x, particle1.y),
+                    (particle2.x, particle2.y),
+                    1,
+                )
+
                 # check if the two particles are close in the y direction by while looping starting around the y_index
                 k = particle1.y_index + 1
                 while not found and k < num_particles and abs(particles[particles_y[k]].y - particle1.y) <= 7:
-                    # check if both particles are walkers
-                    if particle2.id == particles[particles_y[k]].id:
-                        if not (particle1.walker and particles[particles_y[k]].walker) and (
-                            particle1.walker or particles[particles_y[k]].walker
-                        ):
-                            pygame.draw.line(
-                                screen,
-                                yellow,
-                                (particle1.x, particle1.y),
-                                (particles[particles_y[k]].x, particles[particles_y[k]].y),
-                                2,
-                            )
-                            print(particle1.id, particles[particles_y[k]].id)
-                            found = True
-                            # collisions.add((particles_x[i], particles_x[j]))
-                            particle1.walker = False
-                            particle2.walker = False
+                    particle_k = particles[particles_y[k]]
                     k += 1
+                    if (not particle1.walker and not particle_k.walker) or (particle1.walker and particle_k.walker):
+                        continue
+                    # check if both particles are walkers
+                    pygame.draw.line(
+                        screen,
+                        yellow,
+                        (particle1.x, particle1.y),
+                        (particle_k.x, particle_k.y),
+                        2,
+                    )
+                    if particle2.id == particle_k.id:
+                        found = True
+                        particle1.walker = False
+                        particle2.walker = False
 
                 k = particle1.y_index - 1
                 while not found and k >= 0 and abs(particles[particles_y[k]].y - particle1.y) <= 7:
-                    if particle2.id == particles[particles_y[k]].id:
-                        if not (particle1.walker and particles[particles_y[k]].walker) and (
-                            particle1.walker or particles[particles_y[k]].walker
-                        ):
-                            pygame.draw.line(
-                                screen,
-                                yellow,
-                                (particle1.x, particle1.y),
-                                (particles[particles_y[k]].x, particles[particles_y[k]].y),
-                                2,
-                            )
-                            found = True
-                            print(particle1.id, particles[particles_y[k]].id)
-                            # collisions.add((particles_x[i], particles_x[j]))
-                            particle1.walker = False
-                            particle2.walker = False
+                    particle_k = particles[particles_y[k]]
                     k -= 1
-                j += 1
+                    if (not particle1.walker and not particle_k.walker) or (particle1.walker and particle_k.walker):
+                        continue
+                    pygame.draw.line(
+                        screen,
+                        yellow,
+                        (particle1.x, particle1.y),
+                        (particle_k.x, particle_k.y),
+                        2,
+                    )
+                    if particle2.id == particle_k.id:
+                        found = True
+                        particle1.walker = False
+                        particle2.walker = False
 
         for _, particle in particles.items():
             pygame.draw.circle(
