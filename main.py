@@ -5,7 +5,7 @@ import random
 # Constants
 WIDTH = 800  # in pixels
 HEIGHT = 600
-num_particles = 100
+num_particles = 200
 gray = (200, 200, 200)
 black = (0, 0, 0)
 dark_red = (128, 0, 0)
@@ -39,8 +39,6 @@ def main():
                 pygame.quit()
                 sys.exit()
 
-        collisions = set()
-
         screen.fill(black)
 
         particles_x.sort(key=lambda i: particles[i].x)
@@ -54,14 +52,18 @@ def main():
                 particle.x += random.randint(-1, 1)
                 particle.y += random.randint(-1, 1)
 
+        checks_for_particle = []
+
         # loop through particles_x and flag for possible collision if two consecutive particles are too close
         for i in range(num_particles - 1):
             j = i + 1
-            while j < num_particles and abs(particles[particles_x[j]].x - particles[particles_x[i]].x) <= 7:
+            check_for_particle = 1
+
+            while j < num_particles and abs(particles[particles_x[j]].x - particles[particles_x[i]].x) <= 7:  # first check
                 particle1 = particles[particles_x[i]]
                 particle2 = particles[particles_x[j]]
-                # check if one of the particles is a walker
                 found = False
+                check_for_particle += 1  # check for next iteration, even for stopping the while loop
                 j += 1
                 if (not particle1.walker and not particle2.walker) or (particle1.walker and particle2.walker):
                     continue
@@ -75,10 +77,12 @@ def main():
                 )
 
                 # check if the two particles are close in the y direction by while looping starting around the y_index
+                check_for_particle += 1
                 k = particle1.y_index + 1
                 while not found and k < num_particles and abs(particles[particles_y[k]].y - particle1.y) <= 7:
                     particle_k = particles[particles_y[k]]
                     k += 1
+                    check_for_particle += 1
                     if (not particle1.walker and not particle_k.walker) or (particle1.walker and particle_k.walker):
                         continue
                     # check if both particles are walkers
@@ -95,9 +99,11 @@ def main():
                         particle2.walker = False
 
                 k = particle1.y_index - 1
+                check_for_particle += 1  # first check
                 while not found and k >= 0 and abs(particles[particles_y[k]].y - particle1.y) <= 7:
                     particle_k = particles[particles_y[k]]
                     k -= 1
+                    check_for_particle += 1  # next iteration check
                     if (not particle1.walker and not particle_k.walker) or (particle1.walker and particle_k.walker):
                         continue
                     pygame.draw.line(
@@ -111,6 +117,7 @@ def main():
                         found = True
                         particle1.walker = False
                         particle2.walker = False
+            checks_for_particle.append(check_for_particle)
 
         for _, particle in particles.items():
             pygame.draw.circle(
@@ -120,6 +127,9 @@ def main():
                 5,
                 5,
             )
+
+        t = num_particles**2
+        print(f"Avg CPP: {sum(checks_for_particle) / (len(checks_for_particle) + 0.00000001):.02f}")
 
         pygame.display.update()
         clock.tick(60)
