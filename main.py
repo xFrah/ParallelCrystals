@@ -90,8 +90,8 @@ def main():
                         screen,
                         yellow,
                         (particle1.x, particle1.y),
-                        (particle_k.x, particle_k.y),
-                        2,
+                        (particle1.x, particle_k.y + 3),
+                        3,
                     )
                     if particle2.id == particle_k.id:
                         found = True
@@ -110,8 +110,8 @@ def main():
                         screen,
                         yellow,
                         (particle1.x, particle1.y),
-                        (particle_k.x, particle_k.y),
-                        2,
+                        (particle1.x, particle_k.y - 3),
+                        3,
                     )
                     if particle2.id == particle_k.id:
                         found = True
