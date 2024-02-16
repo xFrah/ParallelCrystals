@@ -1,6 +1,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define WIDTH 700
 #define HEIGHT 600
@@ -30,6 +31,8 @@ struct ThreadArgs {
 struct Particle particles[num_particles];
 struct Particle *particles_x[num_particles];
 struct Particle *particles_y[num_particles];
+struct Particle *particles_temp_x[num_particles];
+struct Particle *particles_temp_y[num_particles];
 
 void init_particles() {
     srand(seed);
@@ -72,13 +75,16 @@ int compare_particles_y(const void *a, const void *b) {
     return p1->y - p2->y;
 }
 
-void barrier(int *thread_counter, pthread_mutex_t *mutex, pthread_cond_t *cond, char main_thread) {
+void barrier(int *thread_counter, pthread_mutex_t *mutex, pthread_cond_t *cond) {
     pthread_mutex_lock(mutex);
-    if (!main_thread) {
-        *thread_counter = *thread_counter + 1;
-    }
-    if (*thread_counter == num_threads) {
+    *thread_counter = *thread_counter + 1;
+    if (*thread_counter == num_threads + 1) {
         *thread_counter = 0;
+        memcpy(particles_x, particles_temp_x, sizeof(particles_x));
+        memcpy(particles_y, particles_temp_y, sizeof(particles_y));
+        set_particle_y_index();
+        move_particles();
+        printf("?> Barrier closed\n");
         pthread_cond_broadcast(cond);
     } else {
         while (pthread_cond_wait(cond, mutex) != 0)
@@ -96,8 +102,8 @@ void *array_slice_thread(void *vargp) {
     struct Particle *p2;
     struct Particle *pk;
     while (1) {
-        barrier(args->thread_counter, args->mutex, args->cond, 0);
-        printf("Thread %d started\n", args->start);
+        barrier(args->thread_counter, args->mutex, args->cond);
+        printf("%d> started\n", args->start);
         for (int i = args->start; i < args->end; i++) {
             j = i + 1;
             while (j < num_particles && abs(particles_x[j]->x - particles_x[i]->x) <= particle_radius) {
@@ -132,7 +138,7 @@ void *array_slice_thread(void *vargp) {
                 }
             }
         }
-        printf("Thread %d finished\n", args->start);
+        printf("%d> finished\n", args->start);
     }
     return NULL;
 }
@@ -144,6 +150,10 @@ int main() {
     int thread_counter = 0;
     pthread_t tid[num_threads];
     struct ThreadArgs args[num_threads];
+    pthread_mutex_init(&mutex, NULL);
+    pthread_cond_init(&cond, NULL);
+    memcpy(particles_temp_x, particles_x, sizeof(particles_x));
+    memcpy(particles_temp_y, particles_y, sizeof(particles_y));
     for (int i = 0; i < num_threads; i++) {
         args[i].particles = particles_x;
         args[i].mutex = &mutex;
@@ -154,11 +164,10 @@ int main() {
         pthread_create(&tid[i], NULL, array_slice_thread, &args[i]);
     }
     while (1) {
-        qsort(particles_x, num_particles, sizeof(struct Particle *), compare_particles_x);
-        qsort(particles_y, num_particles, sizeof(struct Particle *), compare_particles_y);
-        set_particle_y_index();
-        move_particles();
-        barrier(&thread_counter, &mutex, &cond, 1);
+        qsort(particles_temp_x, num_particles, sizeof(struct Particle *), compare_particles_x);
+        qsort(particles_temp_y, num_particles, sizeof(struct Particle *), compare_particles_y);
+        barrier(&thread_counter, &mutex, &cond);
+        printf("Main> Barrier opened\n");
     }
     return 0;
 }

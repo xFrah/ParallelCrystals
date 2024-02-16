@@ -5,5 +5,5 @@
 
 ## For compiling: 
 ```bash
-gcc main.c -o a.out
+gcc main.c -o a.out -Wall -lpthread -g
 ```
