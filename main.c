@@ -1,11 +1,14 @@
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #define WIDTH 700
 #define HEIGHT 600
-#define num_particles 100
+#define num_particles 1000
 #define particle_radius 5
 #define seed 17
+#define num_threads 10
+#define slice (num_particles / num_threads);
 
 struct Particle {
     int id;
@@ -13,6 +16,15 @@ struct Particle {
     int y;
     char walker;
     int y_index;
+};
+
+struct ThreadArgs {
+    struct Particle **particles;
+    pthread_mutex_t *mutex;
+    pthread_cond_t *cond;
+    int *thread_counter;
+    int start;
+    int end;
 };
 
 struct Particle particles[num_particles];
@@ -60,21 +72,33 @@ int compare_particles_y(const void *a, const void *b) {
     return p1->y - p2->y;
 }
 
+void barrier(int *thread_counter, pthread_mutex_t *mutex, pthread_cond_t *cond, char main_thread) {
+    pthread_mutex_lock(mutex);
+    if (!main_thread) {
+        *thread_counter = *thread_counter + 1;
+    }
+    if (*thread_counter == num_threads) {
+        *thread_counter = 0;
+        pthread_cond_broadcast(cond);
+    } else {
+        while (pthread_cond_wait(cond, mutex) != 0)
+            ;
+    }
+    pthread_mutex_unlock(mutex);
+}
 
-int main() {
-    init_particles();
+void *array_slice_thread(void *vargp) {
+    struct ThreadArgs *args = (struct ThreadArgs *)vargp;
+    char found;
+    int j;
+    int k;
+    struct Particle *p1;
+    struct Particle *p2;
+    struct Particle *pk;
     while (1) {
-        qsort(particles_x, num_particles, sizeof(struct Particle *), compare_particles_x);
-        qsort(particles_y, num_particles, sizeof(struct Particle *), compare_particles_y);
-        set_particle_y_index();
-        move_particles();
-        char found;
-        int j;
-        int k;
-        struct Particle *p1;
-        struct Particle *p2;
-        struct Particle *pk;
-        for (int i = 0; i < num_particles - 1; i++) {
+        barrier(args->thread_counter, args->mutex, args->cond, 0);
+        printf("Thread %d started\n", args->start);
+        for (int i = args->start; i < args->end; i++) {
             j = i + 1;
             while (j < num_particles && abs(particles_x[j]->x - particles_x[i]->x) <= particle_radius) {
                 p1 = particles_x[i];
@@ -108,6 +132,33 @@ int main() {
                 }
             }
         }
+        printf("Thread %d finished\n", args->start);
+    }
+    return NULL;
+}
+
+int main() {
+    init_particles();
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    int thread_counter = 0;
+    pthread_t tid[num_threads];
+    struct ThreadArgs args[num_threads];
+    for (int i = 0; i < num_threads; i++) {
+        args[i].particles = particles_x;
+        args[i].mutex = &mutex;
+        args[i].cond = &cond;
+        args[i].thread_counter = &thread_counter;
+        args[i].start = i * slice;
+        args[i].end = (i + 1) * slice;
+        pthread_create(&tid[i], NULL, array_slice_thread, &args[i]);
+    }
+    while (1) {
+        qsort(particles_x, num_particles, sizeof(struct Particle *), compare_particles_x);
+        qsort(particles_y, num_particles, sizeof(struct Particle *), compare_particles_y);
+        set_particle_y_index();
+        move_particles();
+        barrier(&thread_counter, &mutex, &cond, 1);
     }
     return 0;
 }
