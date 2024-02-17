@@ -17,7 +17,7 @@ struct Particle {
     int id;
     int x;
     int y;
-    char walker;
+    int walker;
     int y_index;
 };
 

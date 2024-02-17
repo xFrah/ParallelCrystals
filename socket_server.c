@@ -1,13 +1,30 @@
+#include <asm-generic/socket.h>
+#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
 #include <unistd.h>
-#include <asm-generic/socket.h>
 #define PORT 6789
+#define num_particles 1000
 
-int socket_server_start () {
+struct Particle {
+    int id;
+    int x;
+    int y;
+    int walker;
+    int y_index;
+};
+
+// make a struct that contains header, packet length, packet data and footer
+struct Packet {
+    char header[4];
+    int length;
+    struct Particle particles[num_particles];
+    char footer[4];
+};
+
+int socket_server_start() {
     // ssize_t valread;
 
     printf("Starting server\n");
@@ -71,10 +88,16 @@ int socket_server_start () {
     return new_socket;
 }
 
-void socket_server_send (int socket, void *particles, int length) {
-    int nbs = send(socket, particles, length, 0);
-    if (nbs < 0) {
-        perror("send");
-        exit(EXIT_FAILURE);
-    }
+void socket_server_send(int socket, void *particles, int length) {
+    // create packet
+    struct Packet packet;
+    memcpy(packet.header, "PART", 4);
+    packet.length = length;
+    memcpy(packet.particles, particles, length);
+    memcpy(packet.footer, "ENDP", 4);
+    int nbs = send(socket, &packet, sizeof(packet), 0);
+    // if (nbs < 0) {
+    //     perror("send");
+    //     exit(EXIT_FAILURE);
+    // }
 }
