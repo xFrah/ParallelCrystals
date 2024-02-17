@@ -5,5 +5,5 @@
 
 ## For compiling: 
 ```bash
-gcc main.c -o a.out -Wall -lpthread -g
+gcc main.c socket_server.c -o a.out -Wall -lpthread -g
 ```

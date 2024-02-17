@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include "socket_server.h"
 
 #define WIDTH 700
 #define HEIGHT 600
@@ -33,6 +35,8 @@ struct Particle *particles_x[num_particles];
 struct Particle *particles_y[num_particles];
 struct Particle *particles_temp_x[num_particles];
 struct Particle *particles_temp_y[num_particles];
+
+int socket_holder;
 
 int compare_particles_x(const void *a, const void *b) {
     struct Particle *p1 = *(struct Particle **)a; // we can probably optimize this by offsetting the pointer
@@ -85,6 +89,7 @@ void barrier(int *thread_counter, pthread_mutex_t *mutex, pthread_cond_t *cond, 
         memcpy(particles_y, particles_temp_y, sizeof(particles_y));
         update_particles(); // new particle positions are ready, update structs
         printf("%d> Barrier reached (%d/%d)\n", thread_id, num_threads + 1, num_threads + 1);
+        socket_server_send(socket_holder, particles, num_particles * sizeof(struct Particle));
         pthread_cond_broadcast(cond);
     } else {
         printf("%d> Waiting at barrier (%d/%d)\n", thread_id, *thread_counter, num_threads + 1);
@@ -144,6 +149,8 @@ void *array_slice_thread(void *vargp) {
 }
 
 int main() {
+    socket_holder = socket_server_start();
+    printf("DEBUG 1\n");
     pthread_mutex_t mutex;
     pthread_cond_t cond;
     int thread_counter = 0;
