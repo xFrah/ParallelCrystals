@@ -8,20 +8,17 @@
 #define PORT 6789
 #define num_particles 1000
 
+int counter_ = 0;
+
 struct Particle {
     int id;
     int x;
     int y;
+    int old_x;
+    int old_y;
     int walker;
     int y_index;
-};
-
-// make a struct that contains header, packet length, packet data and footer
-struct Packet {
-    char header[4];
-    int length;
-    struct Particle particles[num_particles];
-    char footer[4];
+    int old_y_index;
 };
 
 int socket_server_start() {
@@ -71,10 +68,11 @@ int socket_server_start() {
         exit(EXIT_FAILURE);
     }
     printf("Listening\n");
-    if ((new_socket = accept(server_fd, (struct sockaddr *)&address,
-                             &addrlen)) < 0) {
-        perror("accept");
-        exit(EXIT_FAILURE);
+    while (1) {
+        if ((new_socket = accept(server_fd, (struct sockaddr *)&address,
+                                 &addrlen)) >= 0) {
+            break;
+        }
     }
     printf("Connection accepted\n");
     // valread = read(new_socket, buffer,
@@ -89,13 +87,13 @@ int socket_server_start() {
 }
 
 void socket_server_send(int socket, void *particles, int length) {
-    // create packet
-    struct Packet packet;
-    memcpy(packet.header, "PART", 4);
-    packet.length = length;
-    memcpy(packet.particles, particles, length);
-    memcpy(packet.footer, "ENDP", 4);
-    int nbs = send(socket, &packet, sizeof(packet), 0);
+    char buffer[4 + 4 + num_particles * sizeof(struct Particle) + 4];
+    memcpy(buffer, "PART", 4);
+    memcpy(buffer + 4, &length, 4);
+    memcpy(buffer + 8, particles, length);
+    memcpy(buffer + 8 + length, "ENDP", 4);
+    send(socket, buffer, sizeof(buffer), 0);
+
     // if (nbs < 0) {
     //     perror("send");
     //     exit(EXIT_FAILURE);
