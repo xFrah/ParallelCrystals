@@ -1,3 +1,4 @@
+#include "cJSON.h"
 #include "socket_server.h"
 #include <pthread.h>
 #include <stdio.h>
@@ -5,14 +6,25 @@
 #include <string.h>
 #include <unistd.h>
 
-#define PORT 6789
-#define WIDTH 800
-#define HEIGHT 600
-#define num_particles 200
-#define particle_radius 5
-#define seed 17
-#define num_threads 10
-#define slice (num_particles / num_threads);
+// Helper macro to get JSON values and check their existence
+#define GET_JSON_INT_VALUE(JSON_OBJ, NAME) ({                      \
+    cJSON *item = cJSON_GetObjectItem(JSON_OBJ, NAME);             \
+    if (!item) {                                                   \
+        fprintf(stderr, "Missing configuration item: %s\n", NAME); \
+        cJSON_Delete(JSON_OBJ);                                    \
+        exit(EXIT_FAILURE);                                        \
+    }                                                              \
+    item->valueint;                                                \
+})
+
+int PORT;
+int WIDTH;
+int HEIGHT;
+int NUM_PARTICLES;
+int PARTICLE_RADIUS;
+int SEED;
+int NUM_THREADS;
+int SLICE_LENGTH;
 
 struct Particle {
     int id;
@@ -34,13 +46,48 @@ struct ThreadArgs {
     int end;
 };
 
-struct Particle particles[num_particles];
-struct Particle *particles_x[num_particles];
-struct Particle *particles_y[num_particles];
-struct Particle *particles_temp_x[num_particles];
-struct Particle *particles_temp_y[num_particles];
+struct Particle *particles; // This should be a pointer
+struct Particle **particles_x;
+struct Particle **particles_y;
+struct Particle **particles_temp_x;
+struct Particle **particles_temp_y;
 
 int socket_holder;
+
+void get_configuration() {
+    FILE *f = fopen("config.json", "r");
+    if (f == NULL) {
+        printf("Error configuration opening file\n");
+        exit(1);
+    }
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *string = malloc(fsize + 1);
+    fread(string, 1, fsize, f);
+    fclose(f);
+    string[fsize] = 0;
+    cJSON *json = cJSON_Parse(string);
+    if (json == NULL) {
+        const char *error_ptr = cJSON_GetErrorPtr();
+        if (error_ptr != NULL) {
+            fprintf(stderr, "Error before: %s\n", error_ptr);
+            cJSON_Delete(json); // Cleanup JSON object
+        }
+        exit(1);
+    }
+
+    PORT = GET_JSON_INT_VALUE(json, "network_port");
+    HEIGHT = GET_JSON_INT_VALUE(json, "screen_height");
+    WIDTH = GET_JSON_INT_VALUE(json, "screen_width");
+    NUM_PARTICLES = GET_JSON_INT_VALUE(json, "num_particles");
+    PARTICLE_RADIUS = GET_JSON_INT_VALUE(json, "particle_radius");
+    SEED = GET_JSON_INT_VALUE(json, "seed");
+    NUM_THREADS = GET_JSON_INT_VALUE(json, "num_threads");
+    SLICE_LENGTH = NUM_PARTICLES / NUM_THREADS;
+
+    cJSON_Delete(json);
+}
 
 int compare_particles_x(const void *a, const void *b) {
     struct Particle *p1 = *(struct Particle **)a; // we can probably optimize this by offsetting the pointer
@@ -55,8 +102,14 @@ int compare_particles_y(const void *a, const void *b) {
 }
 
 void init_particles() {
-    srand(seed);
-    for (int i = 0; i < num_particles; i++) {
+    srand(SEED);
+    particles = malloc(NUM_PARTICLES * sizeof(struct Particle));          // Allocating space for an array of struct Particle
+    particles_x = malloc(NUM_PARTICLES * sizeof(struct Particle *));      // Allocating space for an array of pointers
+    particles_y = malloc(NUM_PARTICLES * sizeof(struct Particle *));      // Same as above
+    particles_temp_x = malloc(NUM_PARTICLES * sizeof(struct Particle *)); // Same as above
+    particles_temp_y = malloc(NUM_PARTICLES * sizeof(struct Particle *)); // Same as above
+
+    for (int i = 0; i < NUM_PARTICLES; i++) {
         particles[i].id = i;
         particles[i].x = rand() % WIDTH;
         particles[i].y = rand() % HEIGHT;
@@ -68,16 +121,16 @@ void init_particles() {
         particles_temp_x[i] = &particles[i];
         particles_temp_y[i] = &particles[i];
     }
-    qsort(particles_x, num_particles, sizeof(struct Particle *), compare_particles_x); // first sort
-    qsort(particles_y, num_particles, sizeof(struct Particle *), compare_particles_y);
-    for (int i = 0; i < num_particles; i++) { // first y_index update
+    qsort(particles_x, NUM_PARTICLES, sizeof(struct Particle *), compare_particles_x); // first sort
+    qsort(particles_y, NUM_PARTICLES, sizeof(struct Particle *), compare_particles_y);
+    for (int i = 0; i < NUM_PARTICLES; i++) { // first y_index update
         particles_y[i]->y_index = i;
         particles_y[i]->old_y_index = i;
     }
 }
 
 void update_particles() {
-    for (int i = 0; i < num_particles; i++) { // move particles
+    for (int i = 0; i < NUM_PARTICLES; i++) { // move particles
         particles[i].old_x = particles[i].x;
         particles[i].old_y = particles[i].y;
         particles[i].old_y_index = particles[i].y_index;
@@ -92,19 +145,19 @@ void update_particles() {
 void barrier(int *thread_counter, pthread_mutex_t *mutex, pthread_cond_t *cond, int thread_id) {
     pthread_mutex_lock(mutex);
     *thread_counter = *thread_counter + 1;
-    if (*thread_counter == num_threads + 1) { // +1 for main thread
+    if (*thread_counter == NUM_THREADS + 1) { // +1 for main thread
         *thread_counter = 0;
-        memcpy(particles_x, particles_temp_x, sizeof(particles_x)); // sort on temp is finished, copy to main
-        memcpy(particles_y, particles_temp_y, sizeof(particles_y));
+        memcpy(particles_x, particles_temp_x, NUM_PARTICLES * sizeof(struct Particle *)); // sort on temp is finished, copy to main
+        memcpy(particles_y, particles_temp_y, NUM_PARTICLES * sizeof(struct Particle *));
         // copy particles to old_particles
         update_particles(); // new particle positions are ready, update structs
         // print every particle old_y_index, in the same line
-        // for (int i = 0; i < num_particles; i++) {
+        // for (int i = 0; i < NUM_PARTICLES; i++) {
         //     printf("%d ", particles[i].old_y_index);
         // }
         // printf("\n");
         // printf("%d> Barrier reached (%d/%d)\n", thread_id, num_threads + 1, num_threads + 1);
-        socket_server_send(socket_holder, particles, num_particles * sizeof(struct Particle));
+        socket_server_send(socket_holder, particles, NUM_PARTICLES * sizeof(struct Particle));
         pthread_cond_broadcast(cond);
     } else {
         // printf("%d> Waiting at barrier (%d/%d)\n", thread_id, *thread_counter, num_threads + 1);
@@ -128,7 +181,7 @@ void *array_slice_thread(void *vargp) {
         // printf("%d> Started\n", args->thread_id);
         for (int i = args->start; i < args->end; i++) {
             j = i + 1;
-            while (j < num_particles && abs(particles_x[j]->old_x - particles_x[i]->old_x) <= particle_radius) {
+            while (j < NUM_PARTICLES && abs(particles_x[j]->old_x - particles_x[i]->old_x) <= PARTICLE_RADIUS) {
                 p1 = particles_x[i];
                 p2 = particles_x[j];
                 found = 0;
@@ -146,12 +199,12 @@ void *array_slice_thread(void *vargp) {
                 k = p1->old_y_index + s;
                 // print k
                 printf("%d> old_y_index = %d, k = %d, s = %d\n", args->thread_id, p1->old_y_index, k, s);
-                while (!found && k < num_particles && abs(particles_y[k]->old_y - p1->old_y) <= particle_radius) {
+                while (!found && k < NUM_PARTICLES && abs(particles_y[k]->old_y - p1->old_y) <= PARTICLE_RADIUS) {
                     pk = particles_y[k];
                     k = k + s;
                     // if old_y_index of p1 and pk is the same
                     if (p1->old_y_index == pk->old_y_index) {
-                        for (int i = 0; i < num_particles; i++) {
+                        for (int i = 0; i < NUM_PARTICLES; i++) {
                             printf("%d ", particles[i].old_y_index);
                         }
                         printf("\n");
@@ -171,29 +224,30 @@ void *array_slice_thread(void *vargp) {
 }
 
 int main() {
+    get_configuration();
     socket_holder = socket_server_start(PORT);
     printf("DEBUG 1\n");
     pthread_mutex_t mutex;
     pthread_cond_t cond;
     int thread_counter = 0;
-    pthread_t tid[num_threads];
-    struct ThreadArgs args[num_threads];
+    pthread_t tid[NUM_THREADS];
+    struct ThreadArgs args[NUM_THREADS];
     pthread_mutex_init(&mutex, NULL);
     pthread_cond_init(&cond, NULL);
     init_particles();
-    for (int i = 0; i < num_threads; i++) {
+    for (int i = 0; i < NUM_THREADS; i++) {
         args[i].mutex = &mutex;
         args[i].cond = &cond;
         args[i].thread_counter = &thread_counter;
         args[i].thread_id = i + 1;
-        args[i].start = i * slice;
-        args[i].end = (i + 1) * slice;
+        args[i].start = i * SLICE_LENGTH;
+        args[i].end = (i + 1) * SLICE_LENGTH;
         pthread_create(&tid[i], NULL, array_slice_thread, &args[i]);
     }
     while (1) {
-        qsort(particles_temp_x, num_particles, sizeof(struct Particle *), compare_particles_x); // TODO assign 2 threads to sort
+        qsort(particles_temp_x, NUM_PARTICLES, sizeof(struct Particle *), compare_particles_x); // TODO assign 2 threads to sort
         // printf("MAIN> Sorted x\n");
-        qsort(particles_temp_y, num_particles, sizeof(struct Particle *), compare_particles_y);
+        qsort(particles_temp_y, NUM_PARTICLES, sizeof(struct Particle *), compare_particles_y);
         // printf("MAIN> Sorted y\n");
         barrier(&thread_counter, &mutex, &cond, 0);
     }

@@ -2,13 +2,44 @@ import time
 import pygame
 import sys
 import socket
+import json
 import struct
 import threading
 
-max_length = (1000 * 64) + 200
+
+def load_config():
+    with open("config.json", "r") as file:
+        config = json.load(file)
+
+    width = config["screen_width"]
+    height = config["screen_height"]
+    particle_radius = config["particle_radius"]
+    port = config["network_port"]
+    num_particles = config["num_particles"]
+    return width, height, particle_radius, port, num_particles
+
+
+# Constants
+WIDTH, HEIGHT, PARTICLE_RADIUS, PORT, NUM_PARTICLES = load_config()
+gray = (200, 200, 200)
+black = (0, 0, 0)
+dark_red = (128, 0, 0)
+max_length = (NUM_PARTICLES * 64) + (NUM_PARTICLES * 0.2)
 packet_counter = 0
 start_counter = time.time()
 current_packet = {}
+
+# Define the packet and particle structure formats
+header_format = "4s"
+length_format = "i"
+footer_format = "4s"
+particle_format = "iiiiiiii"
+
+header_size = struct.calcsize(header_format)
+length_size = struct.calcsize(length_format)
+footer_size = struct.calcsize(footer_format)
+particle_size = struct.calcsize(particle_format)
+
 
 class Particle:
     def __init__(self, iid, x, y, old_x, old_y, walker, y_index, old_y_index):
@@ -21,16 +52,6 @@ class Particle:
         self.y_index = y_index
         self.old_y_index = old_y_index
 
-# Define the packet and particle structure formats
-header_format = '4s'
-length_format = 'i'
-footer_format = '4s'
-particle_format = 'iiiiiiii'
-
-header_size = struct.calcsize(header_format)
-length_size = struct.calcsize(length_format)
-footer_size = struct.calcsize(footer_format)
-particle_size = struct.calcsize(particle_format)
 
 def connect_to_server(address):
     while True:
@@ -42,6 +63,7 @@ def connect_to_server(address):
         except ConnectionRefusedError:
             print("Connection failed. Trying again in 5 seconds...")
             time.sleep(5)
+
 
 def receive_and_parse_packets(sock):
     global current_packet, packet_counter, start_counter
@@ -56,16 +78,16 @@ def receive_and_parse_packets(sock):
             buffer += data
 
             while True:
-                if b'PART' not in buffer:
+                if b"PART" not in buffer:
                     break
-                start_index = buffer.find(b'PART')
+                start_index = buffer.find(b"PART")
                 del buffer[:start_index]
 
                 if len(buffer) < header_size + length_size:
                     break
 
                 length_offset = header_size
-                (length,) = struct.unpack(length_format, buffer[length_offset:length_offset + length_size])
+                (length,) = struct.unpack(length_format, buffer[length_offset : length_offset + length_size])
                 if length > max_length:
                     buffer = bytearray()
                     break
@@ -74,13 +96,15 @@ def receive_and_parse_packets(sock):
                 if len(buffer) < packet_end:
                     break
 
-                footer = buffer[packet_end - footer_size:packet_end]
-                if footer != b'ENDP':
+                footer = buffer[packet_end - footer_size : packet_end]
+                if footer != b"ENDP":
                     break
 
-                particles_data = buffer[length_offset + length_size:packet_end - footer_size]
+                particles_data = buffer[length_offset + length_size : packet_end - footer_size]
                 current_packet = {
-                    struct.unpack(particle_format, particles_data[i:i + particle_size])[0]: Particle(*struct.unpack(particle_format, particles_data[i:i + particle_size]))
+                    struct.unpack(particle_format, particles_data[i : i + particle_size])[0]: Particle(
+                        *struct.unpack(particle_format, particles_data[i : i + particle_size])
+                    )
                     for i in range(0, length, particle_size)
                 }
                 packet_counter += 1
@@ -93,12 +117,6 @@ def receive_and_parse_packets(sock):
             print("Error occurred:", e)
             break
 
-# Constants
-WIDTH = 800
-HEIGHT = 600
-gray = (200, 200, 200)
-black = (0, 0, 0)
-dark_red = (128, 0, 0)
 
 def main():
     pygame.init()
@@ -106,8 +124,8 @@ def main():
     pygame.display.set_caption("Random Walk")
 
     clock = pygame.time.Clock()
-    server_address = ('localhost', 6789)
-    
+    server_address = ("localhost", PORT)
+
     while True:
         sock = connect_to_server(server_address)
         thread = threading.Thread(target=receive_and_parse_packets, args=(sock,), daemon=True)
@@ -126,8 +144,8 @@ def main():
                     screen,
                     gray if particle.walker else dark_red,
                     (particle.x, particle.y),
-                    5,
-                    5,
+                    PARTICLE_RADIUS,
+                    PARTICLE_RADIUS,
                 )
 
             pygame.display.update()
@@ -135,6 +153,7 @@ def main():
 
         print("Attempting to reconnect...")
         time.sleep(5)  # Wait a bit before reconnecting
+
 
 if __name__ == "__main__":
     main()
