@@ -5,9 +5,10 @@
 #include <string.h>
 #include <unistd.h>
 
+#define PORT 6789
 #define WIDTH 800
 #define HEIGHT 600
-#define num_particles 50
+#define num_particles 200
 #define particle_radius 5
 #define seed 17
 #define num_threads 10
@@ -170,7 +171,7 @@ void *array_slice_thread(void *vargp) {
 }
 
 int main() {
-    socket_holder = socket_server_start();
+    socket_holder = socket_server_start(PORT);
     printf("DEBUG 1\n");
     pthread_mutex_t mutex;
     pthread_cond_t cond;

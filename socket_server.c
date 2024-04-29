@@ -5,10 +5,6 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#define PORT 6789
-#define num_particles 1000
-
-int counter_ = 0;
 
 struct Particle {
     int id;
@@ -21,7 +17,7 @@ struct Particle {
     int old_y_index;
 };
 
-int socket_server_start() {
+int socket_server_start(int port) {
     // ssize_t valread;
 
     printf("Starting server\n");
@@ -52,7 +48,7 @@ int socket_server_start() {
 
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(PORT);
+    address.sin_port = htons(port);
 
     printf("Address set\n");
 
@@ -87,7 +83,7 @@ int socket_server_start() {
 }
 
 void socket_server_send(int socket, void *particles, int length) {
-    char buffer[4 + 4 + num_particles * sizeof(struct Particle) + 4];
+    char buffer[4 + 4 + length + 4];
     memcpy(buffer, "PART", 4);
     memcpy(buffer + 4, &length, 4);
     memcpy(buffer + 8, particles, length);
