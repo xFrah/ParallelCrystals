@@ -10,11 +10,8 @@ struct Particle {
     int id;
     int x;
     int y;
-    int old_x;
-    int old_y;
     int walker;
     int y_index;
-    int old_y_index;
 };
 
 int socket_server_start(int port) {

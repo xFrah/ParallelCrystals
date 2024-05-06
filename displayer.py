@@ -33,7 +33,7 @@ current_packet = {}
 header_format = "4s"
 length_format = "i"
 footer_format = "4s"
-particle_format = "iiiiiiii"
+particle_format = "iiiii"
 
 header_size = struct.calcsize(header_format)
 length_size = struct.calcsize(length_format)
@@ -42,15 +42,12 @@ particle_size = struct.calcsize(particle_format)
 
 
 class Particle:
-    def __init__(self, iid, x, y, old_x, old_y, walker, y_index, old_y_index):
+    def __init__(self, iid, x, y, walker, y_index):
         self.id = iid
         self.x = x
         self.y = y
-        self.old_x = old_x
-        self.old_y = old_y
         self.walker = walker
         self.y_index = y_index
-        self.old_y_index = old_y_index
 
 
 def connect_to_server(address):
