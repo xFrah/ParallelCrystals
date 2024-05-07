@@ -112,6 +112,8 @@ void init_particles() {
         particles[i].id = i;
         particles[i].x = rand() % WIDTH;
         particles[i].y = rand() % HEIGHT;
+        particles[i].new_x = particles[i].x;
+        particles[i].new_y = particles[i].y;
         particles[i].walker = rand() % 6 ? 1 : 0;
         particles_x[i] = &particles[i];
         particles_y[i] = &particles[i];
