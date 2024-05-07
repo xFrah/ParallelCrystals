@@ -1,9 +1,22 @@
-1. Sort
-2. Move
-3. Check for collisions in x axis
-4. Check for collisions in y axis
-
 ## For compiling: 
 ```bash
-gcc main.c -o a.out
+gcc main.c socket_server.c cJSON.c -o a.out -Wall -lpthread -g
 ```
+
+## For running:
+First change the configuration in the `config.json` file.
+
+For running the "backend":
+```bash
+./a.out
+```
+
+For running the "frontend":
+```bash
+python3 displayer.py
+```
+
+
+## Lil diagram
+
+![diagram](diagram.png)
