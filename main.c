@@ -32,6 +32,8 @@ struct Particle {
     int y;
     int walker;
     int y_index;
+    int new_x;
+    int new_y;
 };
 
 struct ThreadArgs {
@@ -89,13 +91,13 @@ void get_configuration() {
 int compare_particles_x(const void *a, const void *b) {
     struct Particle *p1 = *(struct Particle **)a; // we can probably optimize this by offsetting the pointer
     struct Particle *p2 = *(struct Particle **)b;
-    return p1->x - p2->x;
+    return p1->new_x - p2->new_x;
 }
 
 int compare_particles_y(const void *a, const void *b) {
     struct Particle *p1 = *(struct Particle **)a;
     struct Particle *p2 = *(struct Particle **)b;
-    return p1->y - p2->y;
+    return p1->new_y - p2->new_y;
 }
 
 void init_particles() {
@@ -123,12 +125,19 @@ void init_particles() {
     }
 }
 
-void update_particles() {
+void move_particles() {
     for (int i = 0; i < NUM_PARTICLES; i++) { // move particles
         if (particles[i].walker) {
-            particles[i].x = particles[i].x + 1 + (-2 * (rand() % 2));
-            particles[i].y = particles[i].y + 1 + (-2 * (rand() % 2));
+            particles[i].new_x = particles[i].x + 1 + (-2 * (rand() % 2));
+            particles[i].new_y = particles[i].y + 1 + (-2 * (rand() % 2));
         }
+    }
+}
+
+void update_particles() {
+    for (int i = 0; i < NUM_PARTICLES; i++) { // move particles
+        particles[i].x = particles[i].new_x;
+        particles[i].y = particles[i].new_y;
         particles_y[i]->y_index = i;
     }
 }
@@ -184,7 +193,7 @@ void *array_slice_thread(void *vargp) {
 
                 k = p1->y_index + s;
                 // print k
-                printf("%d> old_y_index = %d, k = %d, s = %d, j = %d, i = %d\n", args->thread_id, p1->y_index, k, s, j, i);
+                // printf("%d> old_y_index = %d, k = %d, s = %d, j = %d, i = %d\n", args->thread_id, p1->y_index, k, s, j, i);
                 // print Checking p1
                 while (!found && k < NUM_PARTICLES && abs(particles_y[k]->y - p1->y) <= PARTICLE_RADIUS) {
                     pk = particles_y[k];
@@ -196,10 +205,10 @@ void *array_slice_thread(void *vargp) {
                         }
                         printf("\n");
                     }
-                    printf("%d p1 = (%d, %d, id=%d, yi=%d), p2 = (%d, %d, id=%d, yi=%d), pk = (%d, %d, id=%d, yi=%d)\n", s, p1->x, p1->y, p1->id, p1->y_index, p2->x, p2->y, p2->id, p2->y_index, pk->x, pk->y, pk->id, pk->y_index);
+                    // printf("%d p1 = (%d, %d, id=%d, yi=%d), p2 = (%d, %d, id=%d, yi=%d), pk = (%d, %d, id=%d, yi=%d)\n", s, p1->x, p1->y, p1->id, p1->y_index, p2->x, p2->y, p2->id, p2->y_index, pk->x, pk->y, pk->id, pk->y_index);
                     if (p2->id == pk->id) {
                         found = 1;
-                        printf("%d> Found collision between %d and %d\n", args->thread_id, p1->id, p2->id);
+                        // printf("%d> Found collision between %d and %d\n", args->thread_id, p1->id, p2->id);
                         p1->walker = 0;
                         p2->walker = 0;
                     }
@@ -232,6 +241,12 @@ int main() {
         pthread_create(&tid[i], NULL, array_slice_thread, &args[i]);
     }
     while (1) {
+        // print all particles_y with the coordinates and y_index
+        printf("-----------------------------------------\n");
+        for (int i = 0; i < NUM_PARTICLES; i++) {
+            printf("(y=%d, yi=%d)\n", particles_y[i]->y, particles_y[i]->y_index);
+        }
+        move_particles();
         qsort(particles_temp_x, NUM_PARTICLES, sizeof(struct Particle *), compare_particles_x); // TODO assign 2 threads to sort
         // printf("MAIN> Sorted x\n");
         qsort(particles_temp_y, NUM_PARTICLES, sizeof(struct Particle *), compare_particles_y);

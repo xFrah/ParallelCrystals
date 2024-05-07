@@ -6,14 +6,6 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-struct Particle {
-    int id;
-    int x;
-    int y;
-    int walker;
-    int y_index;
-};
-
 int socket_server_start(int port) {
     // ssize_t valread;
 
