@@ -9,6 +9,7 @@
 #include <iostream>
 
 namespace cg = cooperative_groups;
+__device__ curandState state;
 
 struct Particle {
     int id;
@@ -59,11 +60,13 @@ void allocate_memory() {
 
 __global__ void init_particles_kernel(Particle *particles, int n, int width, int height) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
+    curand_init(3423423, i, 0, &state);
     if (i < n) {
         particles[i].id = i;
         particles[i].x = i % width;
         particles[i].y = i % height;
-        particles[i].walker = rand() % 2;
+        // particles[i].walker = rand() % 2;
+        particles[i].walker = curand(&state) % 2;
         particles[i].y_index = i;
         particles[i].new_x = particles[i].x;
         particles[i].new_y = particles[i].y;
@@ -85,8 +88,8 @@ __global__ void persistent_kernel(Particle **particles_x, Particle **particles_y
         while (true) {
             for (int i = 0; i < num_particles; i++) { // move particles
                 if (particles_x[i]->walker) {
-                    particles_x[i]->new_x = particles_x[i]->x + 1 + (-2 * (rand() % 2));
-                    particles_x[i]->new_y = particles_x[i]->y + 1 + (-2 * (rand() % 2));
+                    particles_x[i]->new_x = particles_x[i]->x + 1 + (-2 * (curand(&state) % 2));
+                    particles_x[i]->new_y = particles_x[i]->y + 1 + (-2 * (curand(&state) % 2));
                 }
             }
 
@@ -98,8 +101,14 @@ __global__ void persistent_kernel(Particle **particles_x, Particle **particles_y
             // Synchronize all threads in the grid
             grid.sync();
 
-            cudaMemcpy(particles_x, particles_temp_x, num_particles * sizeof(Particle *), cudaMemcpyDeviceToDevice);
-            cudaMemcpy(particles_y, particles_temp_y, num_particles * sizeof(Particle *), cudaMemcpyDeviceToDevice);
+            // cudaMemcpy(particles_x, particles_temp_x, num_particles * sizeof(Particle *), cudaMemcpyDeviceToDevice);
+            // cudaMemcpy(particles_y, particles_temp_y, num_particles * sizeof(Particle *), cudaMemcpyDeviceToDevice);
+
+            // same but we are in device, so we can't use cudaMemcpy
+            for (int i = 0; i < num_particles; i++) {
+                particles_x[i] = particles_temp_x[i];
+                particles_y[i] = particles_temp_y[i];
+            }
 
             for (int i = 0; i < num_particles; i++) { // update particles
                 particles[i].x = particles[i].new_x;
