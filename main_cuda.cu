@@ -11,6 +11,16 @@
 namespace cg = cooperative_groups;
 __device__ curandState state;
 
+#define CHECK_CUDA_ERROR(call) {                                          \
+    cudaError_t err = call;                                               \
+    if (err != cudaSuccess) {                                             \
+        std::cerr << "CUDA error in " << __FILE__ << " at line "          \
+                  << __LINE__ << ": " << cudaGetErrorString(err) << "\n"; \
+        exit(err);                                                        \
+    }                                                                     \
+}
+
+
 struct Particle {
     int id;
     int x;
@@ -51,37 +61,38 @@ struct compare_particles_y {
 };
 
 void allocate_memory() {
-    cudaMallocManaged(&particles, NUM_PARTICLES * sizeof(Particle));
-    cudaMallocManaged(&particles_x, NUM_PARTICLES * sizeof(Particle *));
-    cudaMallocManaged(&particles_y, NUM_PARTICLES * sizeof(Particle *));
-    cudaMallocManaged(&particles_temp_x, NUM_PARTICLES * sizeof(Particle *));
-    cudaMallocManaged(&particles_temp_y, NUM_PARTICLES * sizeof(Particle *));
+    CHECK_CUDA_ERROR(cudaMallocManaged(&particles, NUM_PARTICLES * sizeof(Particle)));
+    CHECK_CUDA_ERROR(cudaMallocManaged(&particles_x, NUM_PARTICLES * sizeof(Particle *)));
+    CHECK_CUDA_ERROR(cudaMallocManaged(&particles_y, NUM_PARTICLES * sizeof(Particle *)));
+    CHECK_CUDA_ERROR(cudaMallocManaged(&particles_temp_x, NUM_PARTICLES * sizeof(Particle *)));
+    CHECK_CUDA_ERROR(cudaMallocManaged(&particles_temp_y, NUM_PARTICLES * sizeof(Particle *)));
 }
 
-__global__ void init_particles_kernel(Particle *particles, int n, int width, int height) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    curand_init(3423423, i, 0, &state);
-    if (i < n) {
+
+void init_particles() {
+    // int blockSize = 256;
+    // int numBlocks = (NUM_PARTICLES + blockSize - 1) / blockSize;
+    // init_particles_kernel<<<numBlocks, blockSize>>>(particles, NUM_PARTICLES, WIDTH, HEIGHT);
+    // cudaDeviceSynchronize();
+    for (int i = 0; i < NUM_PARTICLES; i++) {
         particles[i].id = i;
-        particles[i].x = i % width;
-        particles[i].y = i % height;
-        // particles[i].walker = rand() % 2;
-        particles[i].walker = curand(&state) % 2;
+        particles[i].x = i % WIDTH;
+        particles[i].y = i % HEIGHT;
+        particles[i].walker = rand() % 2;
         particles[i].y_index = i;
         particles[i].new_x = particles[i].x;
         particles[i].new_y = particles[i].y;
+        particles_x[i] = &particles[i];
+        particles_y[i] = &particles[i];
+        particles_temp_x[i] = &particles[i];
+        particles_temp_y[i] = &particles[i];
     }
-}
-
-void init_particles() {
-    int blockSize = 256;
-    int numBlocks = (NUM_PARTICLES + blockSize - 1) / blockSize;
-    init_particles_kernel<<<numBlocks, blockSize>>>(particles, NUM_PARTICLES, WIDTH, HEIGHT);
-    cudaDeviceSynchronize();
+    std::cout << "Initialized particles" << std::endl;
 }
 
 
 __global__ void persistent_kernel(Particle **particles_x, Particle **particles_y, Particle **particles_temp_x, Particle **particles_temp_y, int num_particles, int particle_radius) {
+    printf("DEBUG 3.5\n");
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     cg::grid_group grid = cg::this_grid();
     if (idx == 0) {
@@ -171,20 +182,59 @@ void launch_persistent_kernel() {
     int blockSize = 256; // Number of threads per block
     int numBlocks = (NUM_PARTICLES + blockSize - 1) / blockSize;
 
-    void *kernelArgs[] = { &particles_x, &particles_y, &particles_temp_x, &particles_temp_y, &NUM_PARTICLES, &PARTICLE_RADIUS };
+    std::cout << "DEBUG 3.1" << std::endl;
 
-    cudaLaunchCooperativeKernel((void*)persistent_kernel, numBlocks, blockSize, kernelArgs);
+    void *kernelArgs[] = { &particles_x, &particles_y, &particles_temp_x, &particles_temp_y, &NUM_PARTICLES, &PARTICLE_RADIUS };
+    std::cout << "DEBUG 3.2" << std::endl;
+
+    // Check if device supports cooperative groups
+    cudaDeviceProp deviceProp;
+    cudaGetDeviceProperties(&deviceProp, 0);
+    if (!deviceProp.cooperativeLaunch) {
+        std::cerr << "Device does not support cooperative launch" << std::endl;
+        return;
+    } else {
+        std::cout << "Device supports cooperative launch" << std::endl;
+    }
+
+    // print all args before launching for debug
+    // print persistent kernel address
+    std::cout << "persistent_kernel address: " << (void*)persistent_kernel << std::endl;
+    // print numBlocks
+    std::cout << "numBlocks: " << numBlocks << std::endl;
+    // print blockSize
+    std::cout << "blockSize: " << blockSize << std::endl;
+    // print kernelArgs
+    for (int i = 0; i < sizeof(kernelArgs) / sizeof(kernelArgs[0]); i++) {
+        std::cout << "kernelArgs[" << i << "]: " << kernelArgs[i] << std::endl;
+    }
+    cudaError_t err = cudaLaunchCooperativeKernel((void*)persistent_kernel, numBlocks, blockSize, kernelArgs);
+    if (err != cudaSuccess) {
+        std::cerr << "Error launching kernel: " << cudaGetErrorString(err) << std::endl;
+    }
+    std::cout << "DEBUG 3.3" << std::endl;
     cudaDeviceSynchronize();
+    std::cout << "DEBUG 3.4" << std::endl;
 }
 
 int main() {
+    cudaError_t error = cudaGetLastError();
+    if(error != cudaSuccess) {
+        std::cout << cudaGetErrorString(error);
+    } else {
+        std::cout << "No CUDA error detected" << std::endl;
+    }
     std::cout << "DEBUG 1" << std::endl;
     allocate_memory();
+    std::cout << "DEBUG 2" << std::endl;
     init_particles();
+    std::cout << "DEBUG 3" << std::endl;
 
     launch_persistent_kernel();
+    std::cout << "DEBUG 4" << std::endl;
 
     while (1) {
+        std::cout << "DEBUG 5" << std::endl;
     }
 
     return 0;
