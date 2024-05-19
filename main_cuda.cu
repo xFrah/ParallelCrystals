@@ -51,13 +51,6 @@ struct Particle {
     int new_y;
 };
 
-__device__ curandState state;
-Particle *particles;
-Particle **particles_x;
-Particle **particles_y;
-Particle **particles_temp_x;
-Particle **particles_temp_y;
-
 struct Configuration {
     int PORT;
     int WIDTH;
@@ -68,6 +61,15 @@ struct Configuration {
     int NUM_THREADS;
     int SLICE_LENGTH;
 };
+
+__device__ curandState state;
+__device__ Configuration d_config;
+struct Configuration config;
+Particle *particles;
+Particle **particles_x;
+Particle **particles_y;
+Particle **particles_temp_x;
+Particle **particles_temp_y;
 
 extern "C" struct Configuration get_configuration();
 
@@ -94,18 +96,8 @@ struct Configuration get_configuration() {
         exit(1);
     }
 
-    // PORT = get_json_int_value(json, "network_port");
-    // HEIGHT = get_json_int_value(json, "screen_height");
-    // WIDTH = get_json_int_value(json, "screen_width");
-    // NUM_PARTICLES = get_json_int_value(json, "num_particles");
-    // PARTICLE_RADIUS = get_json_int_value(json, "particle_radius");
-    // SEED = get_json_int_value(json, "seed");
-    // NUM_THREADS = get_json_int_value(json, "num_threads");
-    // SLICE_LENGTH = NUM_PARTICLES / NUM_THREADS;
-
     cJSON_Delete(json);
 
-    // same but with struct
     struct Configuration config;
     config.PORT = get_json_int_value(json, "network_port");
     config.HEIGHT = get_json_int_value(json, "screen_height");
@@ -133,7 +125,7 @@ struct compare_particles_y {
     }
 };
 
-void allocate_memory(struct Configuration config) {
+void allocate_memory() {
     CHECK_CUDA_ERROR(cudaMalloc(&particles, config.NUM_PARTICLES * sizeof(Particle)));
     CHECK_CUDA_ERROR(cudaMalloc(&particles_x, config.NUM_PARTICLES * sizeof(Particle *)));
     CHECK_CUDA_ERROR(cudaMalloc(&particles_y, config.NUM_PARTICLES * sizeof(Particle *)));
@@ -141,13 +133,12 @@ void allocate_memory(struct Configuration config) {
     CHECK_CUDA_ERROR(cudaMalloc(&particles_temp_y, config.NUM_PARTICLES * sizeof(Particle *)));
 }
 
-// init particle kernel
-__global__ void init_particles_kernel(Configuration config, Particle *particles, Particle **particles_x, Particle **particles_y, Particle **particles_temp_x, Particle **particles_temp_y) {
-    curand_init(config.SEED, 0, 0, &state);
-    for (int i = 0; i < config.NUM_PARTICLES; i++) {
+__global__ void init_particles_kernel(Particle *particles, Particle **particles_x, Particle **particles_y, Particle **particles_temp_x, Particle **particles_temp_y) {
+    curand_init(d_config.SEED, 0, 0, &state);
+    for (int i = 0; i < d_config.NUM_PARTICLES; i++) {
         particles[i].id = i;
-        particles[i].x = curand(&state) % config.WIDTH;
-        particles[i].y = curand(&state) % config.HEIGHT;
+        particles[i].x = curand(&state) % d_config.WIDTH;
+        particles[i].y = curand(&state) % d_config.HEIGHT;
         particles[i].walker = curand(&state) % 2;
         particles[i].y_index = i;
         particles[i].new_x = particles[i].x;
@@ -159,77 +150,65 @@ __global__ void init_particles_kernel(Configuration config, Particle *particles,
     }
 }
 
-void init_particles(Configuration config) {
-    init_particles_kernel<<<1, 1>>>(config, particles, particles_x, particles_y, particles_temp_x, particles_temp_y);
+__global__ void move_particles_kernel(Particle **particles_x, Particle **particles_y) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int num_threads = blockDim.x * gridDim.x;
+    int start = (idx * d_config.NUM_PARTICLES) / num_threads;
+    int end = ((idx + 1) * d_config.NUM_PARTICLES) / num_threads;
+    for (int i = start; i < end; i++) { // move particles
+        if (particles_x[i]->walker) {
+            particles_x[i]->new_x = particles_x[i]->x + 1 + (-2 * (curand(&state) % 2));
+            particles_x[i]->new_y = particles_x[i]->y + 1 + (-2 * (curand(&state) % 2));
+        }
+    }
+}
+
+void init_particles() {
+    init_particles_kernel<<<1, 1>>>(particles, particles_x, particles_y, particles_temp_x, particles_temp_y);
     cudaDeviceSynchronize();
     CHECK_LAST_ERROR();
 }
 
-__global__ void cooperativeKernel(Particle *particles, Particle **particles_x, Particle **particles_y, Particle **particles_temp_x, Particle **particles_temp_y, Configuration *config) {
-    int num_particles = config->NUM_PARTICLES;
-    int particle_radius = config->PARTICLE_RADIUS;
-
-    // start time
-    clock_t start = clock();
-    
-    // Perform some simple computation
+__global__ void cooperativeKernel(Particle *particles, Particle **particles_x, Particle **particles_y, Particle **particles_temp_x, Particle **particles_temp_y) {
+    int num_particles = d_config.NUM_PARTICLES;
+    int particle_radius = d_config.PARTICLE_RADIUS;
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    // printf("Thread %d\n", idx);
-    if (idx == 0) {
+    int num_threads = blockDim.x * gridDim.x;
+    // Calculate the portion of the array this thread should process
+    int start = (idx * num_particles) / num_threads;
+    int end = ((idx + 1) * num_particles) / num_threads;
+    char found;
+    int j, k, s, i;
+    Particle *p1, *p2, *pk;
 
-        // printf("Iteration %d\n", iteration);
-        for (int i = 0; i < num_particles; i++) { // move particles
-            if (particles_x[i]->walker) {
-                particles_x[i]->new_x = particles_x[i]->x + 1 + (-2 * (curand(&state) % 2));
-                particles_x[i]->new_y = particles_x[i]->y + 1 + (-2 * (curand(&state) % 2));
+    for (i = start; i < end; i++) {
+        j = i + 1;
+        while (j < num_particles && abs(particles_x[j]->x - particles_x[i]->x) <= particle_radius) {
+            p1 = particles_x[i];
+            p2 = particles_x[j];
+            found = 0;
+            j++;
+            if (p1->walker == p2->walker) {
+                continue;
             }
-        }
 
-        thrust::device_ptr<Particle*> dev_ptr_x(particles_temp_x);
-        thrust::sort(dev_ptr_x, dev_ptr_x + num_particles, compare_particles_x());
+            s = (p1->y_index < p2->y_index) ? 1 : -1;
+            k = p1->y_index + s;
 
-        thrust::device_ptr<Particle*> dev_ptr_y(particles_temp_y);
-        thrust::sort(dev_ptr_y, dev_ptr_y + num_particles, compare_particles_y());
+            while (!found && k < num_particles && abs(particles_y[k]->y - p1->y) <= particle_radius) {
+                pk = particles_y[k];
+                k = k + s;
 
-    } else {
-        int num_threads = blockDim.x * gridDim.x;
-        // Calculate the portion of the array this thread should process
-        int start = (idx * num_particles) / num_threads;
-        int end = ((idx + 1) * num_particles) / num_threads;
-        // printf("Thread %d: %d - %d\n", idx, start, end);
-        char found;
-        int j, k, s, i;
-        Particle *p1, *p2, *pk;
-
-        for (i = start; i < end; i++) {
-            j = i + 1;
-            while (j < num_particles && abs(particles_x[j]->x - particles_x[i]->x) <= particle_radius) {
-                p1 = particles_x[i];
-                p2 = particles_x[j];
-                found = 0;
-                j++;
-                if (p1->walker == p2->walker) {
-                    continue;
-                }
-
-                s = (p1->y_index < p2->y_index) ? 1 : -1;
-                k = p1->y_index + s;
-
-                while (!found && k < num_particles && abs(particles_y[k]->y - p1->y) <= particle_radius) {
-                    pk = particles_y[k];
-                    k = k + s;
-
-                    if (p2->id == pk->id) {
-                        found = 1;
-                        p1->walker = 0;
-                        p2->walker = 0;
-                        printf("Collision between %d and %d\n", p1->id, p2->id);
-                    }
+                if (p2->id == pk->id) {
+                    found = 1;
+                    p1->walker = 0;
+                    p2->walker = 0;
+                    printf("Collision between %d and %d\n", p1->id, p2->id);
                 }
             }
         }
     }
-    // printf("Time of %d: %f\n", idx, (double)(clock() - start) / CLOCKS_PER_SEC);
+
 }
 
 void queryDevices() {
@@ -248,9 +227,12 @@ void queryDevices() {
 }
 
 
-// update_particles_kernel
-__global__ void update_particles_kernel(Configuration *config, Particle *particles, Particle **particles_y) {
-    for (int i = 0; i < config->NUM_PARTICLES; i++) { // update particles
+__global__ void update_particles_kernel(Particle *particles, Particle **particles_y) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int num_threads = blockDim.x * gridDim.x;
+    int start = (idx * d_config.NUM_PARTICLES) / num_threads;
+    int end = ((idx + 1) * d_config.NUM_PARTICLES) / num_threads;
+    for (int i = start; i < end; i++) { // update particles
         particles[i].x = particles[i].new_x;
         particles[i].y = particles[i].new_y;
         particles_y[i]->y_index = i;
@@ -259,67 +241,50 @@ __global__ void update_particles_kernel(Configuration *config, Particle *particl
 
 
 int main() {
-    struct Configuration config = get_configuration();
+    config = get_configuration();
+    // Copy configuration to device
+    CHECK_CUDA_ERROR(cudaMemcpyToSymbol(d_config, &config, sizeof(Configuration)));
 
-    // // Start the socket server
+    // Start the socket server
     int socket_holder = socket_server_start(config.PORT);
     if (socket_holder < 0) {
         std::cerr << "Failed to start socket server\n";
         return -1;
     }
-    // copy the configuration to the device
-    Configuration *d_config;
-    CHECK_CUDA_ERROR(cudaMalloc(&d_config, sizeof(Configuration)));
-    CHECK_CUDA_ERROR(cudaMemcpy(d_config, &config, sizeof(Configuration), cudaMemcpyHostToDevice));
+
     queryDevices();
-    allocate_memory(config);
-    init_particles(config);
-
-    // socket_server_send(socket_holder, particles, config.NUM_PARTICLES * sizeof(struct Particle));
-
-    std::cout << "Configuration loaded:\n";
-    std::cout << "PORT: " << config.PORT << "\n";
-    std::cout << "HEIGHT: " << config.HEIGHT << "\n";
-    std::cout << "WIDTH: " << config.WIDTH << "\n";
-    std::cout << "NUM_PARTICLES: " << config.NUM_PARTICLES << "\n";
-    std::cout << "PARTICLE_RADIUS: " << config.PARTICLE_RADIUS << "\n";
-    std::cout << "SEED: " << config.SEED << "\n";
-    std::cout << "NUM_THREADS: " << config.NUM_THREADS << "\n";
-    std::cout << "SLICE_LENGTH: " << config.SLICE_LENGTH << "\n";
+    allocate_memory();
+    init_particles();
 
     // Define kernel launch parameters
-    int numBlocks = 48;
+    int numBlocks = 68;
     int threadsPerBlock = 32;
-
-    // Check if the device supports cooperative launch
-    cudaDeviceProp deviceProp;
-    cudaGetDeviceProperties(&deviceProp, 0);
-    if (!deviceProp.cooperativeLaunch) {
-        std::cerr << "Device does not support cooperative launch.\n";
-        return -1;
-    } else {
-        std::cout << "Device supports cooperative launch.\n";
-    }
-
     int iteration = 0;
 
-    // local particle array
+    // Local particles array to send to the client
     Particle * local_particles = (Particle *)malloc(config.NUM_PARTICLES * sizeof(Particle));
 
     while (true) {
-        cooperativeKernel<<<numBlocks, threadsPerBlock>>>(particles, particles_x, particles_y, particles_temp_x, particles_temp_y, d_config);
+        cooperativeKernel<<<numBlocks, threadsPerBlock>>>(particles, particles_x, particles_y, particles_temp_x, particles_temp_y);
         cudaDeviceSynchronize();
         CHECK_LAST_ERROR();
+
+        move_particles_kernel<<<numBlocks, threadsPerBlock>>>(particles_x, particles_y);
+
+        thrust::sort(thrust::device, particles_temp_x, particles_temp_x + config.NUM_PARTICLES, compare_particles_x());
+        thrust::sort(thrust::device, particles_temp_y, particles_temp_y + config.NUM_PARTICLES, compare_particles_y());
+
+        cudaDeviceSynchronize();
 
         cudaMemcpy(particles_x, particles_temp_x, config.NUM_PARTICLES * sizeof(Particle *), cudaMemcpyDeviceToDevice);
         cudaMemcpy(particles_y, particles_temp_y, config.NUM_PARTICLES * sizeof(Particle *), cudaMemcpyDeviceToDevice);
 
-        update_particles_kernel<<<1, 1>>>(d_config, particles, particles_y);
+        update_particles_kernel<<<numBlocks, threadsPerBlock>>>(particles, particles_y);
         cudaDeviceSynchronize();
         CHECK_LAST_ERROR();
 
         iteration++;
-        if (iteration % 3 == 0) {
+        if (iteration % 10 == 0) {
             std::cout << "Iteration: " << iteration << "\n";
             cudaMemcpy(local_particles, particles, config.NUM_PARTICLES * sizeof(Particle), cudaMemcpyDeviceToHost);
             socket_server_send(socket_holder, local_particles, config.NUM_PARTICLES * sizeof(struct Particle));
