@@ -6,3 +6,5 @@ cuda.exp
 cuda.lib
 cuda.pdb
 vc140.pdb
+profiler
+profiler.ncu-rep

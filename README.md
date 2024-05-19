@@ -5,7 +5,7 @@ gcc main.c socket_server.c cJSON.c -o a.out -Wall -lpthread -g
 ```
 ##### CUDA
 ```bash
-nvcc main_cuda.cu -o cuda & timeout 5 & cuda.exe
+nvcc main_cuda.cu cJSON.c -o cuda && timeout 5 && cuda.exe
 ```
 
 ## For running:
