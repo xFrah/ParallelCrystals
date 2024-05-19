@@ -69,8 +69,8 @@ void init_particles() {
     // cudaDeviceSynchronize();
     for (int i = 0; i < NUM_PARTICLES; i++) {
         particles[i].id = i;
-        particles[i].x = i % WIDTH;
-        particles[i].y = i % HEIGHT;
+        particles[i].x = rand() % WIDTH;
+        particles[i].y = rand() % HEIGHT;
         particles[i].walker = rand() % 2;
         particles[i].y_index = i;
         particles[i].new_x = particles[i].x;
@@ -90,11 +90,14 @@ __global__ void cooperativeKernel(Particle *particles, Particle **particles_x, P
     
     // Perform some simple computation
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    printf("Thread %d\n", idx);
+    // printf("Thread %d\n", idx);
+    int iteration = 0;
     if (idx == 0) {
         curandState state;
         curand_init(123123, 0, 0, &state);
         while (true) {
+            iteration++;
+            // printf("Iteration %d\n", iteration);
             for (int i = 0; i < num_particles; i++) { // move particles
                 if (particles_x[i]->walker) {
                     particles_x[i]->new_x = particles_x[i]->x + 1 + (-2 * (curand(&state) % 2));
@@ -137,6 +140,7 @@ __global__ void cooperativeKernel(Particle *particles, Particle **particles_x, P
         int j, k, s, i;
         Particle *p1, *p2, *pk;
         while (true) {
+            iteration++;
             for (i = start; i < end; i++) {
                 j = i + 1;
                 while (j < num_particles && abs(particles_x[j]->x - particles_x[i]->x) <= particle_radius) {
@@ -166,6 +170,7 @@ __global__ void cooperativeKernel(Particle *particles, Particle **particles_x, P
                             found = 1;
                             p1->walker = 0;
                             p2->walker = 0;
+                            printf("Collision between %d and %d at iteration %d\n", p1->id, p2->id, iteration);
                         }
                     }
                 }
