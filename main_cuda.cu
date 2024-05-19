@@ -51,6 +51,7 @@ struct Particle {
     int new_y;
 };
 
+__device__ curandState state;
 Particle *particles;
 Particle **particles_x;
 Particle **particles_y;
@@ -142,8 +143,7 @@ void allocate_memory(struct Configuration config) {
 
 // init particle kernel
 __global__ void init_particles_kernel(Configuration config, Particle *particles, Particle **particles_x, Particle **particles_y, Particle **particles_temp_x, Particle **particles_temp_y) {
-    curandState state;
-    curand_init(123123, 0, 0, &state);
+    curand_init(config.SEED, 0, 0, &state);
     for (int i = 0; i < config.NUM_PARTICLES; i++) {
         particles[i].id = i;
         particles[i].x = curand(&state) % config.WIDTH;
@@ -176,8 +176,6 @@ __global__ void cooperativeKernel(Particle *particles, Particle **particles_x, P
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     // printf("Thread %d\n", idx);
     if (idx == 0) {
-        curandState state;
-        curand_init(123123, 0, 0, &state);
 
         // printf("Iteration %d\n", iteration);
         for (int i = 0; i < num_particles; i++) { // move particles
@@ -305,6 +303,9 @@ int main() {
 
     int iteration = 0;
 
+    // local particle array
+    Particle * local_particles = (Particle *)malloc(config.NUM_PARTICLES * sizeof(Particle));
+
     while (true) {
         cooperativeKernel<<<numBlocks, threadsPerBlock>>>(particles, particles_x, particles_y, particles_temp_x, particles_temp_y, d_config);
         cudaDeviceSynchronize();
@@ -316,10 +317,12 @@ int main() {
         update_particles_kernel<<<1, 1>>>(d_config, particles, particles_y);
         cudaDeviceSynchronize();
         CHECK_LAST_ERROR();
-        // socket_server_send(socket_holder, particles, config.NUM_PARTICLES * sizeof(struct Particle));
+
         iteration++;
-        if (iteration % 100 == 0) {
+        if (iteration % 3 == 0) {
             std::cout << "Iteration: " << iteration << "\n";
+            cudaMemcpy(local_particles, particles, config.NUM_PARTICLES * sizeof(Particle), cudaMemcpyDeviceToHost);
+            socket_server_send(socket_holder, local_particles, config.NUM_PARTICLES * sizeof(struct Particle));
         }
     }
 

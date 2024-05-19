@@ -72,6 +72,8 @@ def receive_and_parse_packets(sock):
                 print("Connection closed by the server.")
                 break
 
+            print(f"Received {len(data)} bytes.")
+
             buffer += data
 
             while True:

@@ -89,18 +89,15 @@ int socket_server_start(int port) {
 void socket_server_send(int socket, void *particles, int length) {
     int buf_lenght = 4 + 4 + length + 4;
     char *buffer = (char *)malloc(buf_lenght);
-    printf("Sending %d bytes\n", buf_lenght);
     memcpy(buffer, "PART", 4);
     memcpy(buffer + 4, &length, 4);
     memcpy(buffer + 8, particles, length);
     memcpy(buffer + 8 + length, "ENDP", 4);
-    int i = send(socket, buffer, sizeof(buffer), 0);
+    int i = send(socket, buffer, buf_lenght, 0);
     if (i < 0) {
         perror("send");
         closesocket(socket);
         cleanup_winsock();
         exit(EXIT_FAILURE);
-    } else {
-        printf("Sent %d bytes\n", i);
     }
 }
