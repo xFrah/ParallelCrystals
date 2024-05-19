@@ -32,6 +32,15 @@ inline int get_json_int_value(cJSON* json_obj, const char* name) {
     }                                                                     \
 }
 
+#define CHECK_LAST_ERROR() {                                              \
+    cudaError_t err = cudaGetLastError();                                 \
+    if (err != cudaSuccess) {                                             \
+        std::cerr << "CUDA error in " << __FILE__ << " at line "          \
+                  << __LINE__ << ": " << cudaGetErrorString(err) << "\n"; \
+        exit(err);                                                        \
+    }                                                                     \
+}
+
 struct Particle {
     int id;
     int x;
@@ -124,39 +133,37 @@ struct compare_particles_y {
 };
 
 void allocate_memory(struct Configuration config) {
-    CHECK_CUDA_ERROR(cudaMallocManaged(&particles, config.NUM_PARTICLES * sizeof(Particle)));
-    CHECK_CUDA_ERROR(cudaMallocManaged(&particles_x, config.NUM_PARTICLES * sizeof(Particle *)));
-    CHECK_CUDA_ERROR(cudaMallocManaged(&particles_y, config.NUM_PARTICLES * sizeof(Particle *)));
-    // CHECK_CUDA_ERROR(cudaMallocManaged(&particles_temp_x, config.NUM_PARTICLES * sizeof(Particle *)));
-    // CHECK_CUDA_ERROR(cudaMallocManaged(&particles_temp_y, config.NUM_PARTICLES * sizeof(Particle *)));
-    // cuda malloc
+    CHECK_CUDA_ERROR(cudaMalloc(&particles, config.NUM_PARTICLES * sizeof(Particle)));
+    CHECK_CUDA_ERROR(cudaMalloc(&particles_x, config.NUM_PARTICLES * sizeof(Particle *)));
+    CHECK_CUDA_ERROR(cudaMalloc(&particles_y, config.NUM_PARTICLES * sizeof(Particle *)));
     CHECK_CUDA_ERROR(cudaMalloc(&particles_temp_x, config.NUM_PARTICLES * sizeof(Particle *)));
     CHECK_CUDA_ERROR(cudaMalloc(&particles_temp_y, config.NUM_PARTICLES * sizeof(Particle *)));
 }
 
-void init_particles(struct Configuration config) {
-    // int blockSize = 256;
-    // int numBlocks = (NUM_PARTICLES + blockSize - 1) / blockSize;
-    // init_particles_kernel<<<numBlocks, blockSize>>>(particles, NUM_PARTICLES, WIDTH, HEIGHT);
-    // cudaDeviceSynchronize();
+// init particle kernel
+__global__ void init_particles_kernel(Configuration config, Particle *particles, Particle **particles_x, Particle **particles_y, Particle **particles_temp_x, Particle **particles_temp_y) {
+    curandState state;
+    curand_init(123123, 0, 0, &state);
     for (int i = 0; i < config.NUM_PARTICLES; i++) {
         particles[i].id = i;
-        particles[i].x = rand() % config.WIDTH;
-        particles[i].y = rand() % config.HEIGHT;
-        particles[i].walker = rand() % 2;
+        particles[i].x = curand(&state) % config.WIDTH;
+        particles[i].y = curand(&state) % config.HEIGHT;
+        particles[i].walker = curand(&state) % 2;
         particles[i].y_index = i;
         particles[i].new_x = particles[i].x;
         particles[i].new_y = particles[i].y;
         particles_x[i] = &particles[i];
         particles_y[i] = &particles[i];
-        // particles_temp_x[i] = &particles[i];
-        // particles_temp_y[i] = &particles[i];
+        particles_temp_x[i] = &particles[i];
+        particles_temp_y[i] = &particles[i];
     }
-    cudaMemcpy(particles_temp_x, particles_x, config.NUM_PARTICLES * sizeof(Particle *), cudaMemcpyDeviceToDevice);
-    cudaMemcpy(particles_temp_y, particles_y, config.NUM_PARTICLES * sizeof(Particle *), cudaMemcpyDeviceToDevice);
-    std::cout << "Initialized particles" << std::endl;
 }
 
+void init_particles(Configuration config) {
+    init_particles_kernel<<<1, 1>>>(config, particles, particles_x, particles_y, particles_temp_x, particles_temp_y);
+    cudaDeviceSynchronize();
+    CHECK_LAST_ERROR();
+}
 
 __global__ void cooperativeKernel(Particle *particles, Particle **particles_x, Particle **particles_y, Particle **particles_temp_x, Particle **particles_temp_y, Configuration *config) {
     int num_particles = config->NUM_PARTICLES;
@@ -180,20 +187,12 @@ __global__ void cooperativeKernel(Particle *particles, Particle **particles_x, P
             }
         }
 
-        printf("Before sort\n");
-        
-
         thrust::device_ptr<Particle*> dev_ptr_x(particles_temp_x);
         thrust::sort(dev_ptr_x, dev_ptr_x + num_particles, compare_particles_x());
 
         thrust::device_ptr<Particle*> dev_ptr_y(particles_temp_y);
         thrust::sort(dev_ptr_y, dev_ptr_y + num_particles, compare_particles_y());
 
-        printf("After sort\n");
-
-        // cudaMemcpy(particles_x, particles_temp_x, num_particles * sizeof(Particle *), cudaMemcpyDeviceToDevice);
-        // cudaMemcpy(particles_y, particles_temp_y, num_particles * sizeof(Particle *), cudaMemcpyDeviceToDevice);
-    
     } else {
         int num_threads = blockDim.x * gridDim.x;
         // Calculate the portion of the array this thread should process
@@ -251,6 +250,16 @@ void queryDevices() {
 }
 
 
+// update_particles_kernel
+__global__ void update_particles_kernel(Configuration *config, Particle *particles, Particle **particles_y) {
+    for (int i = 0; i < config->NUM_PARTICLES; i++) { // update particles
+        particles[i].x = particles[i].new_x;
+        particles[i].y = particles[i].new_y;
+        particles_y[i]->y_index = i;
+    }
+}
+
+
 int main() {
     struct Configuration config = get_configuration();
 
@@ -268,7 +277,7 @@ int main() {
     allocate_memory(config);
     init_particles(config);
 
-    socket_server_send(socket_holder, particles, config.NUM_PARTICLES * sizeof(struct Particle));
+    // socket_server_send(socket_holder, particles, config.NUM_PARTICLES * sizeof(struct Particle));
 
     std::cout << "Configuration loaded:\n";
     std::cout << "PORT: " << config.PORT << "\n";
@@ -282,7 +291,7 @@ int main() {
 
     // Define kernel launch parameters
     int numBlocks = 48;
-    int threadsPerBlock = 8;
+    int threadsPerBlock = 32;
 
     // Check if the device supports cooperative launch
     cudaDeviceProp deviceProp;
@@ -290,36 +299,28 @@ int main() {
     if (!deviceProp.cooperativeLaunch) {
         std::cerr << "Device does not support cooperative launch.\n";
         return -1;
+    } else {
+        std::cout << "Device supports cooperative launch.\n";
     }
 
-    void *kernelArgs[] = { &particles,&particles_x, &particles_y, &particles_temp_x, &particles_temp_y, &d_config};
-
-    // Launch the cooperative kernel
-    // cudaError_t err = cudaLaunchCooperativeKernel((void*)cooperativeKernel, numBlocks, threadsPerBlock, kernelArgs);
-    // if (err != cudaSuccess) {
-    //     std::cerr << "Failed to launch cooperative kernel: " << cudaGetErrorString(err) << "\n";
-    //     return -1;
-    // }
-    // launch as normal kernel
+    int iteration = 0;
 
     while (true) {
         cooperativeKernel<<<numBlocks, threadsPerBlock>>>(particles, particles_x, particles_y, particles_temp_x, particles_temp_y, d_config);
         cudaDeviceSynchronize();
-        printf("Iteration\n");
-        // same but we are in device, so we can't use cudaMemcpy
-        // for (int i = 0; i < config.NUM_PARTICLES; i++) {
-        //     particles_x[i] = particles_temp_x[i];
-        //     particles_y[i] = particles_temp_y[i];
-        // }
+        CHECK_LAST_ERROR();
+
         cudaMemcpy(particles_x, particles_temp_x, config.NUM_PARTICLES * sizeof(Particle *), cudaMemcpyDeviceToDevice);
         cudaMemcpy(particles_y, particles_temp_y, config.NUM_PARTICLES * sizeof(Particle *), cudaMemcpyDeviceToDevice);
 
-        for (int i = 0; i < config.NUM_PARTICLES; i++) { // update particles
-            particles[i].x = particles[i].new_x;
-            particles[i].y = particles[i].new_y;
-            particles_y[i]->y_index = i;
-        }
+        update_particles_kernel<<<1, 1>>>(d_config, particles, particles_y);
+        cudaDeviceSynchronize();
+        CHECK_LAST_ERROR();
         // socket_server_send(socket_holder, particles, config.NUM_PARTICLES * sizeof(struct Particle));
+        iteration++;
+        if (iteration % 100 == 0) {
+            std::cout << "Iteration: " << iteration << "\n";
+        }
     }
 
     std::cout << "Cooperative kernel executed successfully.\n";
