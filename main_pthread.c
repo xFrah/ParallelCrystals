@@ -47,9 +47,7 @@ struct ThreadArgs {
 
 struct Particle *particles; // This should be a pointer
 struct Particle **particles_x;
-struct Particle **particles_y;
 struct Particle **particles_temp_x;
-struct Particle **particles_temp_y;
 
 int socket_holder;
 
@@ -104,9 +102,7 @@ void init_particles() {
     srand(SEED);
     particles = malloc(NUM_PARTICLES * sizeof(struct Particle));     // Allocating space for an array of struct Particle
     particles_x = malloc(NUM_PARTICLES * sizeof(struct Particle *)); // Allocating space for an array of pointers
-    particles_y = malloc(NUM_PARTICLES * sizeof(struct Particle *)); // Same as above
     particles_temp_x = malloc(NUM_PARTICLES * sizeof(struct Particle *));
-    particles_temp_y = malloc(NUM_PARTICLES * sizeof(struct Particle *));
 
     for (int i = 0; i < NUM_PARTICLES; i++) {
         particles[i].id = i;
@@ -116,15 +112,9 @@ void init_particles() {
         particles[i].new_y = particles[i].y;
         particles[i].walker = rand() % 6 ? 1 : 0;
         particles_x[i] = &particles[i];
-        particles_y[i] = &particles[i];
         particles_temp_x[i] = &particles[i];
-        particles_temp_y[i] = &particles[i];
     }
     qsort(particles_x, NUM_PARTICLES, sizeof(struct Particle *), compare_particles_x); // first sort
-    qsort(particles_y, NUM_PARTICLES, sizeof(struct Particle *), compare_particles_y);
-    for (int i = 0; i < NUM_PARTICLES; i++) { // first y_index update
-        particles_y[i]->y_index = i;
-    }
 }
 
 void move_particles() {
@@ -140,7 +130,6 @@ void update_particles() {
     for (int i = 0; i < NUM_PARTICLES; i++) { // move particles
         particles[i].x = particles[i].new_x;
         particles[i].y = particles[i].new_y;
-        particles_y[i]->y_index = i;
     }
 }
 
@@ -150,7 +139,6 @@ void barrier(int *thread_counter, pthread_mutex_t *mutex, pthread_cond_t *cond, 
     if (*thread_counter == NUM_THREADS + 1) { // +1 for main thread
         *thread_counter = 0;
         memcpy(particles_x, particles_temp_x, NUM_PARTICLES * sizeof(struct Particle *)); // sort on temp is finished, copy to main
-        memcpy(particles_y, particles_temp_y, NUM_PARTICLES * sizeof(struct Particle *));
         // copy particles to old_particles
         update_particles(); // new particle positions are ready, update structs
         // printf("%d> Barrier reached (%d/%d)\n", thread_id, num_threads + 1, num_threads + 1);
@@ -166,54 +154,25 @@ void barrier(int *thread_counter, pthread_mutex_t *mutex, pthread_cond_t *cond, 
 
 void *array_slice_thread(void *vargp) {
     struct ThreadArgs *args = (struct ThreadArgs *)vargp;
-    char found;
     int j;
-    int k;
-    int s;
     struct Particle *p1;
     struct Particle *p2;
-    struct Particle *pk;
     while (1) {
         barrier(args->thread_counter, args->mutex, args->cond, args->thread_id);
         // printf("%d> Started\n", args->thread_id);
         for (int i = args->start; i < args->end; i++) {
             j = i + 1;
+            p1 = particles_x[i];
             while (j < NUM_PARTICLES && abs(particles_x[j]->x - particles_x[i]->x) <= PARTICLE_RADIUS) {
-                p1 = particles_x[i];
                 p2 = particles_x[j];
-                found = 0;
                 j++;
                 if (p1->walker == p2->walker) {
                     continue;
                 }
 
-                if (p1->y_index < p2->y_index) {
-                    s = 1;
-                } else {
-                    s = -1;
-                }
-
-                k = p1->y_index + s;
-                // print k
-                // printf("%d> old_y_index = %d, k = %d, s = %d, j = %d, i = %d\n", args->thread_id, p1->y_index, k, s, j, i);
-                // print Checking p1
-                while (!found && k < NUM_PARTICLES && abs(particles_y[k]->y - p1->y) <= PARTICLE_RADIUS) {
-                    pk = particles_y[k];
-                    k = k + s;
-                    // if old_y_index of p1 and pk is the same
-                    if (p1->y_index == pk->y_index) {
-                        for (int i = 0; i < NUM_PARTICLES; i++) {
-                            printf("%d ", particles[i].y_index);
-                        }
-                        printf("\n");
-                    }
-                    // printf("%d p1 = (%d, %d, id=%d, yi=%d), p2 = (%d, %d, id=%d, yi=%d), pk = (%d, %d, id=%d, yi=%d)\n", s, p1->x, p1->y, p1->id, p1->y_index, p2->x, p2->y, p2->id, p2->y_index, pk->x, pk->y, pk->id, pk->y_index);
-                    if (p2->id == pk->id) {
-                        found = 1;
-                        // printf("%d> Found collision between %d and %d\n", args->thread_id, p1->id, p2->id);
-                        p1->walker = 0;
-                        p2->walker = 0;
-                    }
+                if (abs(p2->y - p1->y) <= PARTICLE_RADIUS) {
+                    p1->walker = 0;
+                    p2->walker = 0;
                 }
             }
         }
@@ -243,16 +202,8 @@ int main() {
         pthread_create(&tid[i], NULL, array_slice_thread, &args[i]);
     }
     while (1) {
-        // print all particles_y with the coordinates and y_index
-        printf("-----------------------------------------\n");
-        for (int i = 0; i < NUM_PARTICLES; i++) {
-            printf("(y=%d, yi=%d)\n", particles_y[i]->y, particles_y[i]->y_index);
-        }
         move_particles();
         qsort(particles_temp_x, NUM_PARTICLES, sizeof(struct Particle *), compare_particles_x); // TODO assign 2 threads to sort
-        // printf("MAIN> Sorted x\n");
-        qsort(particles_temp_y, NUM_PARTICLES, sizeof(struct Particle *), compare_particles_y);
-        // printf("MAIN> Sorted y\n");
         barrier(&thread_counter, &mutex, &cond, 0);
     }
     return 0;

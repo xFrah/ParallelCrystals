@@ -1,7 +1,7 @@
 {
-    "screen_height": 1500,
-    "screen_width": 1500,
-    "num_particles": 10000,
+    "screen_height": 600,
+    "screen_width": 800,
+    "num_particles": 1000,
     "num_threads": 10,
     "particle_radius": 5,
     "seed": 17,
