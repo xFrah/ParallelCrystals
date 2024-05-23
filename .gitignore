@@ -1,6 +1,5 @@
 a.out
 __pycache__
-.vscode
 cuda.exe
 cuda.exp
 cuda.lib
