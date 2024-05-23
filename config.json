@@ -1,9 +1,9 @@
 {
-    "screen_height": 600,
-    "screen_width": 800,
-    "num_particles": 1000,
+    "screen_height": 1000,
+    "screen_width": 1000,
+    "num_particles": 300,
     "num_threads": 10,
     "particle_radius": 5,
     "seed": 17,
-    "network_port": 6789
+    "network_port": 7000
 }
