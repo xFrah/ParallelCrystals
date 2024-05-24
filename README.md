@@ -1,4 +1,4 @@
-## For compiling:
+## For compiling and running:
 #### Pthread
 ```bash
 gcc main.c socket_server.c cJSON.c -o a.out -Wall -lpthread -g
@@ -7,21 +7,12 @@ gcc main.c socket_server.c cJSON.c -o a.out -Wall -lpthread -g
 ```bash
 nvcc main_cuda.cu cJSON.c win_socket_server.c -o cuda && cuda.exe
 ```
-
-## For running:
-First change the configuration in the `config.json` file.
-
-For running the "backend"(**Pthread**):
+#### OpenMP
 ```bash
-./a.out
+gcc -fopenmp -o openmp main_openmp.c && openmp.exe
 ```
 
-For running the "backend"(**CUDA**):
-```bash
-cuda.exe
-```
-
-For running the "frontend":
+## For running the "frontend":
 ```bash
 python3 displayer.py
 ```
