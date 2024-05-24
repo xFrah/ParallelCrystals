@@ -4,6 +4,10 @@ cuda.exe
 cuda.exp
 cuda.lib
 cuda.pdb
+cuda2.exe
+cuda2.exp
+cuda2.lib
+cuda2.pdb
 vc140.pdb
 profiler
 profiler.ncu-rep
