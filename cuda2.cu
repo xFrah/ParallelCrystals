@@ -238,24 +238,24 @@ __global__ void sort_single_cell_insertionSort(ListHead*** grid) {
 //     i += 1
     
 // return collisions, check_counter
-__device__ void check_collisions(ListHead *cell1, ListHead *cell2, int threshold, int *collisions, int *check_counter) {
+__device__ void check_collisions(ListHead *cell1, ListHead *cell2) {
     Particle *p1 = cell1->head;
-    Particle *p2 = cell2->head;
-    while (p1 != NULL && p2 != NULL) {
-        while (p2 != NULL && p2->x < p1->x - threshold) {
-            p2 = p2->next_particle;
+    Particle *pj = cell2->head;
+    int threshold = d_config.PARTICLE_RADIUS;
+
+    while (p1 != NULL && pj != NULL) {
+        while (pj != NULL && pj->x < p1->x - threshold) {
+            pj = pj->next_particle;
         }
-        Particle *p2_start = p2;
-        while (p2 != NULL && p2->x <= p1->x + threshold) {
-            if (abs(p1->y - p2->y) <= threshold) {
-                int index = atomicAdd(check_counter, 1);
-                collisions[index] = p1->id;
-                collisions[index + 1] = p2->id;
+
+        Particle *pk = pj;
+        while (pk != NULL && pk->x <= p1->x + threshold) {
+            if (abs(p1->y - pk->y) <= threshold) {
+                // Collision detected
             }
-            p2 = p2->next_particle;
+            pk = pk->next_particle;
         }
         p1 = p1->next_particle;
-        p2 = p2_start;
     }
 }
 
@@ -273,30 +273,59 @@ __global__ void check_for_collisions(ListHead*** grid) {
         if (row == 0 && col == 0) {
             // top left corner
             atomicAdd(&top_left_corner, 1);
+            // compare with cell at the right, cell below, cell at bottom right
+            check_collisions(cell, grid[row][col + 1]);
+            check_collisions(cell, grid[row + 1][col]);
+            check_collisions(cell, grid[row + 1][col + 1]);
         } else if (row == 0 && col == gridWidth - 1) {
             // top right corner
             atomicAdd(&top_right_corner, 1);
+            // compare with cell below and cell at bottom left
+            check_collisions(cell, grid[row + 1][col]);
+            check_collisions(cell, grid[row + 1][col - 1]);
         } else if (row == gridHeight - 1 && col == 0) {
             // bottom left corner
            atomicAdd(&bottom_left_corner, 1);
+           // compare with cell at the right
+            check_collisions(cell, grid[row][col + 1]);
         } else if (row == gridHeight - 1 && col == gridWidth - 1) {
             // bottom right corner
             atomicAdd(&bottom_right_corner, 1);
+            // compare with no one
         } else if (row == 0) {
             // top edge
             atomicAdd(&top_edge, 1);
+            // compare with cell at the right, cell at bottom left, cell below and cell at bottom right
+            check_collisions(cell, grid[row][col + 1]);
+            check_collisions(cell, grid[row + 1][col - 1]);
+            check_collisions(cell, grid[row + 1][col]);
+            check_collisions(cell, grid[row + 1][col + 1]);
         } else if (row == gridHeight - 1) {
             // bottom edge
             atomicAdd(&bottom_edge, 1);
+            // compare with cell at the right
+            check_collisions(cell, grid[row][col + 1]);
         } else if (col == 0) {
             // left edge
             atomicAdd(&left_edge, 1);
+            // compare with cell at the right, cell below, cell at bottom right
+            check_collisions(cell, grid[row][col + 1]);
+            check_collisions(cell, grid[row + 1][col]);
+            check_collisions(cell, grid[row + 1][col + 1]);
         } else if (col == gridWidth - 1) {
             // right edge
             atomicAdd(&right_edge, 1);
+            // compare with cell below and cell at bottom left
+            check_collisions(cell, grid[row + 1][col]);
+            check_collisions(cell, grid[row + 1][col - 1]);
         } else {
             // middle
             atomicAdd(&middle, 1);
+            // compare with cell at the right, cell below, cell at bottom right, cell at bottom left
+            check_collisions(cell, grid[row][col + 1]);
+            check_collisions(cell, grid[row + 1][col]);
+            check_collisions(cell, grid[row + 1][col + 1]);
+            check_collisions(cell, grid[row + 1][col - 1]);
         }
     }
 }
