@@ -31,6 +31,7 @@ struct ListHead {
     Particle* head;
     Particle* tail;
     int mutex;
+    int length;
 };
 
 struct Configuration {
@@ -140,9 +141,13 @@ __device__ void appendNode(ListHead* listHead, Particle* particle) {
 
     if (listHead->head == NULL) {
         listHead->head = particle;
+    } else {
+        listHead->tail->next_particle = particle;
     }
 
     listHead->tail = particle;
+    listHead->length++;
+    particle->next_particle = NULL;
 
     unlock(&(listHead->mutex));
 }
@@ -213,31 +218,15 @@ __global__ void sort_single_cell_insertionSort(ListHead*** grid) {
             tail = tail->next_particle;
         }
         cell->tail = tail;
+
+        // Ensure the last particle's next is null
+        if (tail != NULL) {
+            tail->next_particle = NULL;
+        }
     }
 }
 
-// def check_collisions(particles1, particles2, threshold=1):
-// collisions = []
-// check_counter = 0
-// i, j = 0, 0
-// while i < len(particles1) and j < len(particles2):
-//     p1 = particles1[i]
-        
-//     # Check particles in particles2 within the x-threshold
-//     while j < len(particles2) and particles2[j].x < p1.x - threshold:
-//         j += 1
-        
-//     k = j
-//     while k < len(particles2) and particles2[k].x <= p1.x + threshold:
-//         p2 = particles2[k]
-//         check_counter += 1
-//         if abs(p1.y - p2.y) <= threshold:
-//             collisions.append((p1, p2))
-//         k += 1
-        
-//     i += 1
-    
-// return collisions, check_counter
+
 __device__ void check_collisions(ListHead *cell1, ListHead *cell2) {
     Particle *p1 = cell1->head;
     Particle *pj = cell2->head;
@@ -250,8 +239,10 @@ __device__ void check_collisions(ListHead *cell1, ListHead *cell2) {
 
         Particle *pk = pj;
         while (pk != NULL && pk->x <= p1->x + threshold) {
-            if (abs(p1->y - pk->y) <= threshold) {
-                // Collision detected
+            if (p1->walker != pk->walker && abs(p1->y - pk->y) <= threshold) {
+                printf("Collision between particles %d and %d\n", p1->id, pk->id);
+                p1->walker = 0;
+                pk->walker = 0;
             }
             pk = pk->next_particle;
         }
@@ -277,21 +268,29 @@ __global__ void check_for_collisions(ListHead*** grid) {
             check_collisions(cell, grid[row][col + 1]);
             check_collisions(cell, grid[row + 1][col]);
             check_collisions(cell, grid[row + 1][col + 1]);
+
+            check_collisions(cell, cell);
         } else if (row == 0 && col == gridWidth - 1) {
             // top right corner
             atomicAdd(&top_right_corner, 1);
             // compare with cell below and cell at bottom left
             check_collisions(cell, grid[row + 1][col]);
             check_collisions(cell, grid[row + 1][col - 1]);
+
+            check_collisions(cell, cell);
         } else if (row == gridHeight - 1 && col == 0) {
             // bottom left corner
-           atomicAdd(&bottom_left_corner, 1);
-           // compare with cell at the right
+            atomicAdd(&bottom_left_corner, 1);
+            // compare with cell at the right
             check_collisions(cell, grid[row][col + 1]);
+
+            check_collisions(cell, cell);
         } else if (row == gridHeight - 1 && col == gridWidth - 1) {
             // bottom right corner
             atomicAdd(&bottom_right_corner, 1);
             // compare with no one
+
+            check_collisions(cell, cell);
         } else if (row == 0) {
             // top edge
             atomicAdd(&top_edge, 1);
@@ -300,11 +299,15 @@ __global__ void check_for_collisions(ListHead*** grid) {
             check_collisions(cell, grid[row + 1][col - 1]);
             check_collisions(cell, grid[row + 1][col]);
             check_collisions(cell, grid[row + 1][col + 1]);
+
+            check_collisions(cell, cell);
         } else if (row == gridHeight - 1) {
             // bottom edge
             atomicAdd(&bottom_edge, 1);
             // compare with cell at the right
             check_collisions(cell, grid[row][col + 1]);
+
+            check_collisions(cell, cell);
         } else if (col == 0) {
             // left edge
             atomicAdd(&left_edge, 1);
@@ -312,12 +315,16 @@ __global__ void check_for_collisions(ListHead*** grid) {
             check_collisions(cell, grid[row][col + 1]);
             check_collisions(cell, grid[row + 1][col]);
             check_collisions(cell, grid[row + 1][col + 1]);
+
+            check_collisions(cell, cell);
         } else if (col == gridWidth - 1) {
             // right edge
             atomicAdd(&right_edge, 1);
             // compare with cell below and cell at bottom left
             check_collisions(cell, grid[row + 1][col]);
             check_collisions(cell, grid[row + 1][col - 1]);
+
+            check_collisions(cell, cell);
         } else {
             // middle
             atomicAdd(&middle, 1);
@@ -326,6 +333,35 @@ __global__ void check_for_collisions(ListHead*** grid) {
             check_collisions(cell, grid[row + 1][col]);
             check_collisions(cell, grid[row + 1][col + 1]);
             check_collisions(cell, grid[row + 1][col - 1]);
+
+            check_collisions(cell, cell);
+        }
+    }
+}
+
+// debug function to print all the linked lists in all the cells
+__global__ void print_linked_lists(ListHead*** grid) {
+    // this kernel will be executed by only 1 thread
+    int gridHeight = d_config.HEIGHT / (d_config.PARTICLE_RADIUS * 2);
+    int gridWidth = d_config.WIDTH / (d_config.PARTICLE_RADIUS * 2);
+
+    int counter = 0;
+
+    for (int i = 0; i < gridHeight; i++) {
+        for (int j = 0; j < gridWidth; j++) {
+            ListHead* cell = grid[i][j];
+            if (cell->head == NULL || cell->length <= 1) {
+                // printf("Cell (%d, %d) is empty\n", i, j);
+                continue;
+            }
+            Particle* p = cell->head;
+            printf("[%d] Cell (%d, %d): ", counter, i, j);
+            while (p != NULL) {
+                printf("%d (%d) ", p->id, p->x);
+                counter++;
+                p = p->next_particle;
+            }
+            printf("\n");
         }
     }
 }
@@ -341,6 +377,7 @@ __global__ void init_particles_kernel(Particle *particles, curandState *states) 
         particles[i].walker = curand(&states[0]) % 2;
         particles[i].new_x = particles[i].x;
         particles[i].new_y = particles[i].y;
+        particles[i].next_particle = NULL;
     }
 }
 
@@ -356,6 +393,7 @@ __global__ void initializeGrid(ListHead*** grid, int height, int width, int cell
         grid[row][col]->head = NULL;
         grid[row][col]->tail = NULL;
         grid[row][col]->mutex = 0;
+        grid[row][col]->length = 0;
     }
 }
 
@@ -448,6 +486,9 @@ int main() {
     std::cout << "top edge: " << top_edge_host << std::endl;
     std::cout << "bottom edge: " << bottom_edge_host << std::endl;
     std::cout << "middle: " << middle_host << std::endl;
+
+    print_linked_lists<<<1, 1>>>(d_grid);
+    cudaDeviceSynchronize();
 
     // Free device memory
     for (int i = 0; i < gridHeight; ++i) {
