@@ -7,6 +7,7 @@
 #include <iostream>
 #include <chrono>
 
+
 // Define kernel launch parameters
 #define numBlocks_ 68
 #define threadsPerBlock_ 32
@@ -545,11 +546,11 @@ int main() {
     auto start = std::chrono::high_resolution_clock::now();
 
     while (1) {
-        makeLinkedLists<<<1, 1>>>(d_grid, particles, config.NUM_PARTICLES, config.WIDTH, config.HEIGHT, cellSize);
-        CHECK_LAST_ERROR();
+        makeLinkedLists<<<numBlocks_, threadsPerBlock_>>>(d_grid, particles, config.NUM_PARTICLES, config.WIDTH, config.HEIGHT, cellSize);
+        cudaDeviceSynchronize();
 
         sort_single_cell_insertionSort<<<blocksPerGrid, threadsPerBlock>>>(d_grid);
-        CHECK_LAST_ERROR();
+        cudaDeviceSynchronize();
 
         check_for_collisions<<<blocksPerGrid, threadsPerBlock>>>(d_grid);
         cudaDeviceSynchronize();
@@ -557,21 +558,21 @@ int main() {
         move_particles_kernel<<<numBlocks_, threadsPerBlock_>>>(particles, states);
         cudaDeviceSynchronize();
 
-        // if (iteration++ % 200 == 0) {
-        //     cudaMemcpy(local_particles, particles, config.NUM_PARTICLES * sizeof(Particle), cudaMemcpyDeviceToHost);
-        //     // for each particle in local particles, copy the data to local_particles_compatibility
-        //     for (int i = 0; i < config.NUM_PARTICLES; i++) {
-        //         local_particles_compatibility[i].id = local_particles[i].id;
-        //         local_particles_compatibility[i].x = local_particles[i].x;
-        //         local_particles_compatibility[i].y = local_particles[i].y;
-        //         local_particles_compatibility[i].walker = local_particles[i].walker;
-        //         local_particles_compatibility[i].y_index = local_particles[i].y_index;
-        //         local_particles_compatibility[i].new_x = local_particles[i].x;
-        //         local_particles_compatibility[i].new_y = local_particles[i].y;
-        //     }
-        //     socket_server_send(socket_holder, local_particles_compatibility, config.NUM_PARTICLES * sizeof(struct Particle_compatibility));
-        // }
-        // cudaDeviceSynchronize();
+        if (iteration % 1000 == 0) {
+            cudaMemcpy(local_particles, particles, config.NUM_PARTICLES * sizeof(Particle), cudaMemcpyDeviceToHost);
+            // for each particle in local particles, copy the data to local_particles_compatibility
+            for (int i = 0; i < config.NUM_PARTICLES; i++) {
+                local_particles_compatibility[i].id = local_particles[i].id;
+                local_particles_compatibility[i].x = local_particles[i].x;
+                local_particles_compatibility[i].y = local_particles[i].y;
+                local_particles_compatibility[i].walker = local_particles[i].walker;
+                local_particles_compatibility[i].y_index = local_particles[i].y_index;
+                local_particles_compatibility[i].new_x = local_particles[i].x;
+                local_particles_compatibility[i].new_y = local_particles[i].y;
+            }
+            socket_server_send(socket_holder, local_particles_compatibility, config.NUM_PARTICLES * sizeof(struct Particle_compatibility));
+        }
+        cudaDeviceSynchronize();
 
         // printf("Iteration %d\n", iteration++);
         if (iteration++ % 1000 == 0) {
