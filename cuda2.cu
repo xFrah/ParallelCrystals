@@ -48,6 +48,16 @@ curandState *states;
 __device__ Configuration d_config;
 struct Configuration config;
 Particle *particles;
+__device__ int top_left_corner = 0;
+__device__ int top_right_corner = 0;
+__device__ int bottom_left_corner = 0;
+__device__ int bottom_right_corner = 0;
+__device__ int left_edge = 0;
+__device__ int right_edge = 0;
+__device__ int top_edge = 0;
+__device__ int bottom_edge = 0;
+__device__ int middle = 0;
+
 
 extern "C" struct Configuration get_configuration();
 
@@ -130,7 +140,6 @@ __device__ void appendNode(ListHead* listHead, Particle* particle) {
 
     if (listHead->head == NULL) {
         listHead->head = particle;
-        printf("Particle %d is the first in the list\n", particle->id);
     }
 
     listHead->tail = particle;
@@ -138,7 +147,7 @@ __device__ void appendNode(ListHead* listHead, Particle* particle) {
     unlock(&(listHead->mutex));
 }
 
-__global__ void traverseAndPrintParticles(ListHead*** grid, Particle* particles, int numParticles, int width, int height, int cellSize) {
+__global__ void makeLinkedLists(ListHead*** grid, Particle* particles, int numParticles, int width, int height, int cellSize) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int num_threads = blockDim.x * gridDim.x;
     int start = (idx * d_config.NUM_PARTICLES) / num_threads;
@@ -155,6 +164,139 @@ __global__ void traverseAndPrintParticles(ListHead*** grid, Particle* particles,
             appendNode(grid[gridY][gridX], p);
         } else {
             printf("Particle %d is out of bounds\n", p->id);
+        }
+    }
+}
+
+__global__ void sort_single_cell_insertionSort(ListHead*** grid) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int cellSize = d_config.PARTICLE_RADIUS * 2;
+    int gridHeight = d_config.HEIGHT / cellSize;
+    int gridWidth = d_config.WIDTH / cellSize;
+
+    if (row < gridHeight && col < gridWidth) {
+        ListHead* cell = grid[row][col];
+        Particle* head = cell->head;
+
+        if (head == NULL) {
+            // printf("Cell (%d, %d) is empty\n", row, col);
+            return;  // If the cell is empty, there's nothing to sort.
+        }
+
+        // Insertion sort on the linked list by x-coordinate
+        Particle* sorted = NULL;
+        Particle* current = head;
+        while (current != NULL) {
+            Particle* next = current->next_particle;
+            if (sorted == NULL || current->x < sorted->x) {
+                current->next_particle = sorted;
+                sorted = current;
+            } else {
+                Particle* search = sorted;
+                while (search->next_particle != NULL && search->next_particle->x < current->x) {
+                    search = search->next_particle;
+                }
+                current->next_particle = search->next_particle;
+                search->next_particle = current;
+            }
+            current = next;
+        }
+
+        // Update the cell's head to the new sorted list head
+        cell->head = sorted;
+
+        // Update the tail to the last particle in the sorted list
+        Particle* tail = sorted;
+        while (tail->next_particle != NULL) {
+            tail = tail->next_particle;
+        }
+        cell->tail = tail;
+    }
+}
+
+// def check_collisions(particles1, particles2, threshold=1):
+// collisions = []
+// check_counter = 0
+// i, j = 0, 0
+// while i < len(particles1) and j < len(particles2):
+//     p1 = particles1[i]
+        
+//     # Check particles in particles2 within the x-threshold
+//     while j < len(particles2) and particles2[j].x < p1.x - threshold:
+//         j += 1
+        
+//     k = j
+//     while k < len(particles2) and particles2[k].x <= p1.x + threshold:
+//         p2 = particles2[k]
+//         check_counter += 1
+//         if abs(p1.y - p2.y) <= threshold:
+//             collisions.append((p1, p2))
+//         k += 1
+        
+//     i += 1
+    
+// return collisions, check_counter
+__device__ void check_collisions(ListHead *cell1, ListHead *cell2, int threshold, int *collisions, int *check_counter) {
+    Particle *p1 = cell1->head;
+    Particle *p2 = cell2->head;
+    while (p1 != NULL && p2 != NULL) {
+        while (p2 != NULL && p2->x < p1->x - threshold) {
+            p2 = p2->next_particle;
+        }
+        Particle *p2_start = p2;
+        while (p2 != NULL && p2->x <= p1->x + threshold) {
+            if (abs(p1->y - p2->y) <= threshold) {
+                int index = atomicAdd(check_counter, 1);
+                collisions[index] = p1->id;
+                collisions[index + 1] = p2->id;
+            }
+            p2 = p2->next_particle;
+        }
+        p1 = p1->next_particle;
+        p2 = p2_start;
+    }
+}
+
+__global__ void check_for_collisions(ListHead*** grid) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int cellSize = d_config.PARTICLE_RADIUS * 2;
+    int gridHeight = d_config.HEIGHT / cellSize;
+    int gridWidth = d_config.WIDTH / cellSize;
+
+    if (row < gridHeight && col < gridWidth) {
+        ListHead* cell = grid[row][col];
+        // check what kind of cell this is, top left corner, top right corner, bottom left corner, bottom right corner, left edge, right edge, top edge, bottom edge, or middle
+        if (row == 0 && col == 0) {
+            // top left corner
+            atomicAdd(&top_left_corner, 1);
+        } else if (row == 0 && col == gridWidth - 1) {
+            // top right corner
+            atomicAdd(&top_right_corner, 1);
+        } else if (row == gridHeight - 1 && col == 0) {
+            // bottom left corner
+           atomicAdd(&bottom_left_corner, 1);
+        } else if (row == gridHeight - 1 && col == gridWidth - 1) {
+            // bottom right corner
+            atomicAdd(&bottom_right_corner, 1);
+        } else if (row == 0) {
+            // top edge
+            atomicAdd(&top_edge, 1);
+        } else if (row == gridHeight - 1) {
+            // bottom edge
+            atomicAdd(&bottom_edge, 1);
+        } else if (col == 0) {
+            // left edge
+            atomicAdd(&left_edge, 1);
+        } else if (col == gridWidth - 1) {
+            // right edge
+            atomicAdd(&right_edge, 1);
+        } else {
+            // middle
+            atomicAdd(&middle, 1);
         }
     }
 }
@@ -238,10 +380,45 @@ int main() {
     std::cout << "Initialized particles" << std::endl;
 
     // Traverse particles and append them to the linked list in the corresponding cell
-    traverseAndPrintParticles<<<numBlocks_, threadsPerBlock_>>>(d_grid, particles, config.NUM_PARTICLES, config.WIDTH, config.HEIGHT, cellSize);
+    makeLinkedLists<<<numBlocks_, threadsPerBlock_>>>(d_grid, particles, config.NUM_PARTICLES, config.WIDTH, config.HEIGHT, cellSize);
     cudaDeviceSynchronize();
 
     std::cout << "Traversed particles and appended them to the linked list in the corresponding cell" << std::endl;
+
+    // Sort the particles in each cell using insertion sort
+    dim3 sortThreadsPerBlock(16, 16);
+    dim3 sortBlocksPerGrid((gridWidth + sortThreadsPerBlock.x - 1) / sortThreadsPerBlock.x,
+                           (gridHeight + sortThreadsPerBlock.y - 1) / sortThreadsPerBlock.y);
+    sort_single_cell_insertionSort<<<sortBlocksPerGrid, sortThreadsPerBlock>>>(d_grid);
+    cudaDeviceSynchronize();
+
+    std::cout << "Sorted the particles in each cell using insertion sort" << std::endl;
+
+    // Check for collisions
+    check_for_collisions<<<sortBlocksPerGrid, sortThreadsPerBlock>>>(d_grid);
+    cudaDeviceSynchronize();
+
+    // copy counters from device to host
+    int top_left_corner_host, top_right_corner_host, bottom_left_corner_host, bottom_right_corner_host, left_edge_host, right_edge_host, top_edge_host, bottom_edge_host, middle_host;
+    cudaMemcpyFromSymbol(&top_left_corner_host, top_left_corner, sizeof(int));
+    cudaMemcpyFromSymbol(&top_right_corner_host, top_right_corner, sizeof(int));
+    cudaMemcpyFromSymbol(&bottom_left_corner_host, bottom_left_corner, sizeof(int));
+    cudaMemcpyFromSymbol(&bottom_right_corner_host, bottom_right_corner, sizeof(int));
+    cudaMemcpyFromSymbol(&left_edge_host, left_edge, sizeof(int));
+    cudaMemcpyFromSymbol(&right_edge_host, right_edge, sizeof(int));
+    cudaMemcpyFromSymbol(&top_edge_host, top_edge, sizeof(int));
+    cudaMemcpyFromSymbol(&bottom_edge_host, bottom_edge, sizeof(int));
+    cudaMemcpyFromSymbol(&middle_host, middle, sizeof(int));
+
+    std::cout << "top left corner: " << top_left_corner_host << std::endl;
+    std::cout << "top right corner: " << top_right_corner_host << std::endl;
+    std::cout << "bottom left corner: " << bottom_left_corner_host << std::endl;
+    std::cout << "bottom right corner: " << bottom_right_corner_host << std::endl;
+    std::cout << "left edge: " << left_edge_host << std::endl;
+    std::cout << "right edge: " << right_edge_host << std::endl;
+    std::cout << "top edge: " << top_edge_host << std::endl;
+    std::cout << "bottom edge: " << bottom_edge_host << std::endl;
+    std::cout << "middle: " << middle_host << std::endl;
 
     // Free device memory
     for (int i = 0; i < gridHeight; ++i) {
