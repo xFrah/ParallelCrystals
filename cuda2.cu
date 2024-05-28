@@ -40,10 +40,6 @@ struct Particle_compatibility {
 
 struct ListHead {
     Particle* head;
-    Particle* tail;
-    int mutex;
-    int length;
-    bool dirty;
 };
 
 struct Configuration {
@@ -142,36 +138,25 @@ struct Configuration get_configuration() {
     }                                                                     \
 }
 
-__device__ void lock(int* mutex) {
-    while (atomicCAS(mutex, 0, 1) != 0);
-}
+__global__ void reset_linked_lists(ListHead*** grid) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
 
-__device__ void unlock(int* mutex) {
-    atomicExch(mutex, 0);
-}
+    int gridHeight = d_config.HEIGHT / (d_config.PARTICLE_RADIUS * 2);
+    int gridWidth = d_config.WIDTH / (d_config.PARTICLE_RADIUS * 2);
 
-__device__ void appendNode(ListHead* listHead, Particle* particle) {
-    // lock(&(listHead->mutex));
-
-    // printf("Appending particle %d to cell\n", particle->id);
-
-    if (listHead->head == NULL || listHead->dirty == true) {
-        // printf("if\n");
-        listHead->head = particle;
-        listHead->dirty = false;
-        listHead->length = 0;
-    } else {
-        // printf("else\n");
-        listHead->tail->next_particle = particle;
+    if (row < gridHeight && col < gridWidth) {
+        ListHead* cell = grid[row][col];
+        cell->head = NULL;
     }
+}
 
-    listHead->tail = particle;
-    listHead->length++;
-    particle->next_particle = NULL;
-
-    // printf("Particle %d appended to cell\n", particle->id);
-
-    // unlock(&(listHead->mutex));
+__device__ void appendNode(ListHead* listHead, Particle* newHead) {
+    Particle* oldHead;
+    do {
+        oldHead = listHead->head;  // Read the current head
+        newHead->next_particle = oldHead;  // Set the new node's next to the current head
+    } while (atomicCAS((unsigned long long int*)&(listHead->head), (unsigned long long int)oldHead, (unsigned long long int)newHead) != (unsigned long long int)oldHead);
 }
 
 __global__ void makeLinkedLists(ListHead*** grid, Particle* particles, int numParticles, int width, int height, int cellSize) {
@@ -217,8 +202,7 @@ __global__ void sort_single_cell_insertionSort(ListHead*** grid) {
 
     const int MAX_DEPTH = 1000;  // Maximum depth to prevent infinite loop
 
-    // Set dirty
-    if (!(row < gridHeight && col < gridWidth) || grid[row][col]->dirty) {
+    if (!(row < gridHeight && col < gridWidth)) {
         return;
     }
 
@@ -226,7 +210,7 @@ __global__ void sort_single_cell_insertionSort(ListHead*** grid) {
         ListHead* cell = grid[row][col];
         Particle* head = cell->head;
 
-        if (head == NULL || cell->length <= 1) {
+        if (head == NULL || head->next_particle == NULL) {
             return;  // If the cell is empty or has only one element, there's nothing to sort.
         }
 
@@ -267,10 +251,10 @@ __global__ void sort_single_cell_insertionSort(ListHead*** grid) {
         // Update the cell's head to the new sorted list head
         cell->head = sorted;
 
-        // Update the tail to the last particle in the sorted list
+        // Ensure the last particle's next is null
         Particle* tail = sorted;
         depth = 0;  // Reset depth counter for tail update
-        while (tail->next_particle != NULL) {
+        while (tail != NULL && tail->next_particle != NULL) {
             tail = tail->next_particle;
             depth++;
             if (depth > MAX_DEPTH) {
@@ -279,24 +263,18 @@ __global__ void sort_single_cell_insertionSort(ListHead*** grid) {
                 break;
             }
         }
-        cell->tail = tail;
-
-        // Ensure the last particle's next is null
+        // No need to update cell->tail, just ensure the last particle's next is null
         if (tail != NULL) {
             tail->next_particle = NULL;
         }
     }
 }
 
+
 __device__ void check_collisions(ListHead *cell1, ListHead *cell2) {
     Particle *p1 = cell1->head;
     Particle *pj = cell2->head;
     int threshold = d_config.PARTICLE_RADIUS;
-
-    // check if one of the cells is empty or dirty
-    if (cell1->dirty || cell2->dirty) {
-        return;
-    }
 
     while (p1 != NULL && pj != NULL) {
         while (pj != NULL && pj->x < p1->x - threshold) {
@@ -403,7 +381,6 @@ __global__ void check_for_collisions(ListHead*** grid) {
 
             check_collisions(cell, cell);
         }
-        cell->dirty = true;
     }
 }
 
@@ -418,7 +395,7 @@ __global__ void print_linked_lists(ListHead*** grid) {
     for (int i = 0; i < gridHeight; i++) {
         for (int j = 0; j < gridWidth; j++) {
             ListHead* cell = grid[i][j];
-            if (cell->head == NULL || cell->length <= 1) {
+            if (cell->head == NULL) {
                 // printf("Cell (%d, %d) is empty\n", i, j);
                 continue;
             }
@@ -473,10 +450,6 @@ __global__ void initializeGrid(ListHead*** grid, int height, int width, int cell
     if (row < gridHeight && col < gridWidth) {
         grid[row][col] = (ListHead*)malloc(sizeof(ListHead));
         grid[row][col]->head = NULL;
-        grid[row][col]->tail = NULL;
-        grid[row][col]->mutex = 0;
-        grid[row][col]->length = 0;
-        grid[row][col]->dirty = false;
     }
 }
 
@@ -558,21 +531,24 @@ int main() {
         move_particles_kernel<<<numBlocks_, threadsPerBlock_>>>(particles, states);
         cudaDeviceSynchronize();
 
-        if (iteration % 1000 == 0) {
-            cudaMemcpy(local_particles, particles, config.NUM_PARTICLES * sizeof(Particle), cudaMemcpyDeviceToHost);
-            // for each particle in local particles, copy the data to local_particles_compatibility
-            for (int i = 0; i < config.NUM_PARTICLES; i++) {
-                local_particles_compatibility[i].id = local_particles[i].id;
-                local_particles_compatibility[i].x = local_particles[i].x;
-                local_particles_compatibility[i].y = local_particles[i].y;
-                local_particles_compatibility[i].walker = local_particles[i].walker;
-                local_particles_compatibility[i].y_index = local_particles[i].y_index;
-                local_particles_compatibility[i].new_x = local_particles[i].x;
-                local_particles_compatibility[i].new_y = local_particles[i].y;
-            }
-            socket_server_send(socket_holder, local_particles_compatibility, config.NUM_PARTICLES * sizeof(struct Particle_compatibility));
-        }
+        reset_linked_lists<<<blocksPerGrid, threadsPerBlock>>>(d_grid);
         cudaDeviceSynchronize();
+
+        // if (iteration % 1 == 0) {
+        //     cudaMemcpy(local_particles, particles, config.NUM_PARTICLES * sizeof(Particle), cudaMemcpyDeviceToHost);
+        //     // for each particle in local particles, copy the data to local_particles_compatibility
+        //     for (int i = 0; i < config.NUM_PARTICLES; i++) {
+        //         local_particles_compatibility[i].id = local_particles[i].id;
+        //         local_particles_compatibility[i].x = local_particles[i].x;
+        //         local_particles_compatibility[i].y = local_particles[i].y;
+        //         local_particles_compatibility[i].walker = local_particles[i].walker;
+        //         local_particles_compatibility[i].y_index = local_particles[i].y_index;
+        //         local_particles_compatibility[i].new_x = local_particles[i].x;
+        //         local_particles_compatibility[i].new_y = local_particles[i].y;
+        //     }
+        //     socket_server_send(socket_holder, local_particles_compatibility, config.NUM_PARTICLES * sizeof(struct Particle_compatibility));
+        // }
+        // cudaDeviceSynchronize();
 
         // printf("Iteration %d\n", iteration++);
         if (iteration++ % 1000 == 0) {

@@ -264,11 +264,11 @@ int main() {
         update_particles_kernel<<<numBlocks, threadsPerBlock>>>(particles);
         cudaDeviceSynchronize();
 
-        if (iteration++ % 200 == 0) {
-            cudaMemcpy(local_particles, particles, config.NUM_PARTICLES * sizeof(Particle), cudaMemcpyDeviceToHost);
-            socket_server_send(socket_holder, local_particles, config.NUM_PARTICLES * sizeof(struct Particle));
-        }
-        if (iteration % 1000 == 0) {
+        // if (iteration++ % 200 == 0) {
+        //     cudaMemcpy(local_particles, particles, config.NUM_PARTICLES * sizeof(Particle), cudaMemcpyDeviceToHost);
+        //     socket_server_send(socket_holder, local_particles, config.NUM_PARTICLES * sizeof(struct Particle));
+        // }
+        if (iteration++ % 1000 == 0) {
             auto end = std::chrono::high_resolution_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
             std::cout << "Iterations per second: " << 1000.0 / (elapsed / 1000.0) << std::endl;
