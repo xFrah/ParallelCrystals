@@ -56,7 +56,13 @@ struct Configuration {
 
 curandState *states;
 __device__ Configuration d_config;
+__device__ int gridHeight;
+__device__ int gridWidth;
+__device__ int cellSize;
 struct Configuration config;
+int gridHeight_host;
+int gridWidth_host;
+int cellSize_host;
 Particle *particles;
 __device__ int top_left_corner = 0;
 __device__ int top_right_corner = 0;
@@ -144,9 +150,6 @@ __global__ void reset_linked_lists(ListHead*** grid) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
 
-    int gridHeight = d_config.HEIGHT / (d_config.PARTICLE_RADIUS * 2);
-    int gridWidth = d_config.WIDTH / (d_config.PARTICLE_RADIUS * 2);
-
     if (row < gridHeight && col < gridWidth) {
         ListHead* cell = grid[row][col];
         cell->head = NULL;
@@ -167,7 +170,7 @@ __device__ void appendNode(ListHead* listHead, Particle* newHead) {
     atomicCAS(&(listHead->last_updated), listHead->last_updated, iteration);
 }
 
-__global__ void makeLinkedLists(ListHead*** grid, Particle* particles, int numParticles, int width, int height, int cellSize) {
+__global__ void makeLinkedLists(ListHead*** grid, Particle* particles) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx == 0) iteration++;
     int num_threads = blockDim.x * gridDim.x;
@@ -176,15 +179,12 @@ __global__ void makeLinkedLists(ListHead*** grid, Particle* particles, int numPa
     int gridX, gridY;
     Particle *p;
 
-    // printf("Thread %d: start = %d, end = %d\n", idx, start, end);
-
     for (int i = start; i < end; i++) {
         p = &particles[i];
         gridX = p->x / cellSize;
         gridY = p->y / cellSize;
 
-        if (gridX < width / cellSize && gridY < height / cellSize) {
-            // printf("Particle %d: (%d, %d) -> (%d, %d)\n", p->id, p->x, p->y, gridX, gridY);
+        if (gridX < gridWidth && gridY < gridHeight) {
             if (gridX >= 100) {
                 gridX = 99;
             }
@@ -204,10 +204,6 @@ __global__ void makeLinkedLists(ListHead*** grid, Particle* particles, int numPa
 __global__ void sort_single_cell_insertionSort(ListHead*** grid) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
-
-    int cellSize = d_config.PARTICLE_RADIUS * 2;
-    int gridHeight = d_config.HEIGHT / cellSize;
-    int gridWidth = d_config.WIDTH / cellSize;
 
     const int MAX_DEPTH = 1000;  // Maximum depth to prevent infinite loop
 
@@ -281,7 +277,6 @@ __device__ void check_collisions(ListHead *cell1, ListHead *cell2) {
     Particle *pj = cell2->head;
     int threshold = d_config.PARTICLE_RADIUS;
 
-    // check last updated of both
     if (cell1->last_updated != iteration || cell2->last_updated != iteration) {
         return;
     }
@@ -308,10 +303,6 @@ __device__ void check_collisions(ListHead *cell1, ListHead *cell2) {
 __global__ void check_for_collisions(ListHead*** grid) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
-
-    int cellSize = d_config.PARTICLE_RADIUS * 2;
-    int gridHeight = d_config.HEIGHT / cellSize;
-    int gridWidth = d_config.WIDTH / cellSize;
 
     if (row < gridHeight && col < gridWidth) {
         ListHead* cell = grid[row][col];
@@ -396,10 +387,6 @@ __global__ void check_for_collisions(ListHead*** grid) {
 
 // debug function to print all the linked lists in all the cells
 __global__ void print_linked_lists(ListHead*** grid) {
-    // this kernel will be executed by only 1 thread
-    int gridHeight = d_config.HEIGHT / (d_config.PARTICLE_RADIUS * 2);
-    int gridWidth = d_config.WIDTH / (d_config.PARTICLE_RADIUS * 2);
-
     int counter = 0;
 
     for (int i = 0; i < gridHeight; i++) {
@@ -450,10 +437,7 @@ __global__ void init_particles_kernel(Particle *particles, curandState *states) 
     }
 }
 
-__global__ void initializeGrid(ListHead*** grid, int height, int width, int cellSize) {
-    int gridHeight = height / cellSize;
-    int gridWidth = width / cellSize;
-
+__global__ void initializeGrid(ListHead*** grid) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -464,73 +448,69 @@ __global__ void initializeGrid(ListHead*** grid, int height, int width, int cell
     }
 }
 
-
-int main() {
-    config = get_configuration();
-    // Copy configuration to device
+ListHead*** allocate_memory() {
     CHECK_CUDA_ERROR(cudaMemcpyToSymbol(d_config, &config, sizeof(Configuration)));
+    CHECK_CUDA_ERROR(cudaMemcpyToSymbol(gridHeight, &gridHeight_host, sizeof(int)));
+    CHECK_CUDA_ERROR(cudaMemcpyToSymbol(gridWidth, &gridWidth_host, sizeof(int)));
+    CHECK_CUDA_ERROR(cudaMemcpyToSymbol(cellSize, &cellSize_host, sizeof(int)));
     CHECK_CUDA_ERROR(cudaMalloc(&particles, config.NUM_PARTICLES * sizeof(Particle)));
     CHECK_CUDA_ERROR(cudaMalloc(&states, numBlocks_ * threadsPerBlock_ * sizeof(curandState)));
 
-    // Start the socket server
-    int socket_holder = socket_server_start(config.PORT);
-    if (socket_holder < 0) {
-        std::cerr << "Failed to start socket server\n";
-        return -1;
-    }
-
-    int cellSize = config.PARTICLE_RADIUS * 2;
-
-    int gridHeight = config.HEIGHT / cellSize;
-    int gridWidth = config.WIDTH / cellSize;
-
-    std::cout << "Grid size: " << gridHeight << "x" << gridWidth << std::endl;
+    std::cout << "Grid size: " << gridHeight_host << "x" << gridWidth_host << std::endl;
 
     // Allocate memory for the grid on the host
-    ListHead*** h_grid = (ListHead***)malloc(gridHeight * sizeof(ListHead**));
-    for (int i = 0; i < gridHeight; ++i) {
-        h_grid[i] = (ListHead**)malloc(gridWidth * sizeof(ListHead*));
+    ListHead*** h_grid = (ListHead***)malloc(gridHeight_host * sizeof(ListHead**));
+    for (int i = 0; i < gridHeight_host; ++i) {
+        h_grid[i] = (ListHead**)malloc(gridWidth_host * sizeof(ListHead*));
     }
 
     std::cout << "Allocated memory for the grid on the host" << std::endl;
 
     // Allocate memory for the grid on the device
     ListHead*** d_grid;
-    cudaMalloc(&d_grid, gridHeight * sizeof(ListHead**));
-    for (int i = 0; i < gridHeight; ++i) {
+    cudaMalloc(&d_grid, gridHeight_host * sizeof(ListHead**));
+    for (int i = 0; i < gridHeight_host; ++i) {
         ListHead** d_row;
-        cudaMalloc(&d_row, gridWidth * sizeof(ListHead*));
+        cudaMalloc(&d_row, gridWidth_host * sizeof(ListHead*));
         cudaMemcpy(&d_grid[i], &d_row, sizeof(ListHead*), cudaMemcpyHostToDevice);
     }
 
     std::cout << "Allocated memory for the grid on the device" << std::endl;
+    return d_grid;
+}
 
-    // Initialize the grid with linked list heads
+
+int main() {
+    config = get_configuration();
+    cellSize_host = config.PARTICLE_RADIUS * 2;
+    gridHeight_host = config.HEIGHT / cellSize_host;
+    gridWidth_host = config.WIDTH / cellSize_host;
+
+    ListHead*** d_grid = allocate_memory();
+
+    int socket_holder = socket_server_start(config.PORT);
+    if (socket_holder < 0) {
+        std::cerr << "Failed to start socket server\n";
+        return -1;
+    }
+
     dim3 threadsPerBlock(16, 16);
-    dim3 blocksPerGrid((gridWidth + threadsPerBlock.x - 1) / threadsPerBlock.x,
-                       (gridHeight + threadsPerBlock.y - 1) / threadsPerBlock.y);
-    initializeGrid<<<blocksPerGrid, threadsPerBlock>>>(d_grid, config.HEIGHT, config.WIDTH, cellSize);
+    dim3 blocksPerGrid((gridWidth_host + threadsPerBlock.x - 1) / threadsPerBlock.x,
+                       (gridHeight_host + threadsPerBlock.y - 1) / threadsPerBlock.y);
+    initializeGrid<<<blocksPerGrid, threadsPerBlock>>>(d_grid);
     cudaDeviceSynchronize();
 
-    std::cout << "Initialized the grid with linked list heads" << std::endl;
-
-    // Initialize particles
     init_particles_kernel<<<1, 1>>>(particles, states);
     cudaDeviceSynchronize();
 
-    std::cout << "Initialized particles" << std::endl;
-
-    int iteration = 0;
-
-    // Local particles array to send to the client
     Particle * local_particles = (Particle *)malloc(config.NUM_PARTICLES * sizeof(Particle));
-
     Particle_compatibility * local_particles_compatibility = (Particle_compatibility *)malloc(config.NUM_PARTICLES * sizeof(Particle_compatibility));
 
     auto start = std::chrono::high_resolution_clock::now();
+    int iteration = 0;
 
     while (1) {
-        makeLinkedLists<<<numBlocks_, threadsPerBlock_>>>(d_grid, particles, config.NUM_PARTICLES, config.WIDTH, config.HEIGHT, cellSize);
+        makeLinkedLists<<<numBlocks_, threadsPerBlock_>>>(d_grid, particles);
         cudaDeviceSynchronize();
 
         sort_single_cell_insertionSort<<<blocksPerGrid, threadsPerBlock>>>(d_grid);
@@ -550,7 +530,6 @@ int main() {
 
         if (iteration % 1000 == 0) {
             cudaMemcpy(local_particles, particles, config.NUM_PARTICLES * sizeof(Particle), cudaMemcpyDeviceToHost);
-            // for each particle in local particles, copy the data to local_particles_compatibility
             for (int i = 0; i < config.NUM_PARTICLES; i++) {
                 local_particles_compatibility[i].id = local_particles[i].id;
                 local_particles_compatibility[i].x = local_particles[i].x;
