@@ -40,6 +40,7 @@ struct Particle_compatibility {
 
 struct ListHead {
     Particle* head;
+    int last_updated;
 };
 
 struct Configuration {
@@ -68,6 +69,7 @@ __device__ int bottom_edge = 0;
 __device__ int middle = 0;
 
 __device__ int collision_counter = 0;
+__device__ int iteration = 1;
 
 
 extern "C" struct Configuration get_configuration();
@@ -148,6 +150,7 @@ __global__ void reset_linked_lists(ListHead*** grid) {
     if (row < gridHeight && col < gridWidth) {
         ListHead* cell = grid[row][col];
         cell->head = NULL;
+        cell->last_updated = iteration;
     }
 }
 
@@ -155,12 +158,18 @@ __device__ void appendNode(ListHead* listHead, Particle* newHead) {
     Particle* oldHead;
     do {
         oldHead = listHead->head;  // Read the current head
-        newHead->next_particle = oldHead;  // Set the new node's next to the current head
+        if (iteration != listHead->last_updated) {
+            newHead->next_particle = NULL;
+        }
+
     } while (atomicCAS((unsigned long long int*)&(listHead->head), (unsigned long long int)oldHead, (unsigned long long int)newHead) != (unsigned long long int)oldHead);
+
+    atomicCAS(&(listHead->last_updated), listHead->last_updated, iteration);
 }
 
 __global__ void makeLinkedLists(ListHead*** grid, Particle* particles, int numParticles, int width, int height, int cellSize) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx == 0) iteration++;
     int num_threads = blockDim.x * gridDim.x;
     int start = (idx * d_config.NUM_PARTICLES) / num_threads;
     int end = ((idx + 1) * d_config.NUM_PARTICLES) / num_threads;
@@ -201,10 +210,6 @@ __global__ void sort_single_cell_insertionSort(ListHead*** grid) {
     int gridWidth = d_config.WIDTH / cellSize;
 
     const int MAX_DEPTH = 1000;  // Maximum depth to prevent infinite loop
-
-    if (!(row < gridHeight && col < gridWidth)) {
-        return;
-    }
 
     if (row < gridHeight && col < gridWidth) {
         ListHead* cell = grid[row][col];
@@ -275,6 +280,11 @@ __device__ void check_collisions(ListHead *cell1, ListHead *cell2) {
     Particle *p1 = cell1->head;
     Particle *pj = cell2->head;
     int threshold = d_config.PARTICLE_RADIUS;
+
+    // check last updated of both
+    if (cell1->last_updated != iteration || cell2->last_updated != iteration) {
+        return;
+    }
 
     while (p1 != NULL && pj != NULL) {
         while (pj != NULL && pj->x < p1->x - threshold) {
@@ -450,6 +460,7 @@ __global__ void initializeGrid(ListHead*** grid, int height, int width, int cell
     if (row < gridHeight && col < gridWidth) {
         grid[row][col] = (ListHead*)malloc(sizeof(ListHead));
         grid[row][col]->head = NULL;
+        grid[row][col]->last_updated = iteration;
     }
 }
 
@@ -531,24 +542,27 @@ int main() {
         move_particles_kernel<<<numBlocks_, threadsPerBlock_>>>(particles, states);
         cudaDeviceSynchronize();
 
-        reset_linked_lists<<<blocksPerGrid, threadsPerBlock>>>(d_grid);
-        cudaDeviceSynchronize();
+        // Reset the linked lists
+        if (iteration % 1000 == 0) {
+            reset_linked_lists<<<blocksPerGrid, threadsPerBlock>>>(d_grid);
+            cudaDeviceSynchronize();
+        }
 
-        // if (iteration % 1 == 0) {
-        //     cudaMemcpy(local_particles, particles, config.NUM_PARTICLES * sizeof(Particle), cudaMemcpyDeviceToHost);
-        //     // for each particle in local particles, copy the data to local_particles_compatibility
-        //     for (int i = 0; i < config.NUM_PARTICLES; i++) {
-        //         local_particles_compatibility[i].id = local_particles[i].id;
-        //         local_particles_compatibility[i].x = local_particles[i].x;
-        //         local_particles_compatibility[i].y = local_particles[i].y;
-        //         local_particles_compatibility[i].walker = local_particles[i].walker;
-        //         local_particles_compatibility[i].y_index = local_particles[i].y_index;
-        //         local_particles_compatibility[i].new_x = local_particles[i].x;
-        //         local_particles_compatibility[i].new_y = local_particles[i].y;
-        //     }
-        //     socket_server_send(socket_holder, local_particles_compatibility, config.NUM_PARTICLES * sizeof(struct Particle_compatibility));
-        // }
-        // cudaDeviceSynchronize();
+        if (iteration % 1000 == 0) {
+            cudaMemcpy(local_particles, particles, config.NUM_PARTICLES * sizeof(Particle), cudaMemcpyDeviceToHost);
+            // for each particle in local particles, copy the data to local_particles_compatibility
+            for (int i = 0; i < config.NUM_PARTICLES; i++) {
+                local_particles_compatibility[i].id = local_particles[i].id;
+                local_particles_compatibility[i].x = local_particles[i].x;
+                local_particles_compatibility[i].y = local_particles[i].y;
+                local_particles_compatibility[i].walker = local_particles[i].walker;
+                local_particles_compatibility[i].y_index = local_particles[i].y_index;
+                local_particles_compatibility[i].new_x = local_particles[i].x;
+                local_particles_compatibility[i].new_y = local_particles[i].y;
+            }
+            socket_server_send(socket_holder, local_particles_compatibility, config.NUM_PARTICLES * sizeof(struct Particle_compatibility));
+        }
+        cudaDeviceSynchronize();
 
         // printf("Iteration %d\n", iteration++);
         if (iteration++ % 1000 == 0) {
