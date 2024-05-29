@@ -1,18 +1,9 @@
-#include <cuda_runtime.h>
-#include <curand_kernel.h>
 #include <windows.h>
-#include <cooperative_groups.h>
 #include <iostream>
 #include <chrono>
-
-// Define kernel launch parameters
-#define numBlocks_ 68
-#define threadsPerBlock_ 32
-
-extern "C" {
-    #include "libs/cJSON.h"
-    #include "libs/win_socket_server.h"
-}
+#include <omp.h>
+#include "libs/cJSON.h"
+#include "libs/win_socket_server.h"
 
 struct Particle {
     int id;
@@ -22,7 +13,7 @@ struct Particle {
     int y_index;
     int new_x;
     int new_y;
-    Particle *next_particle;
+    struct Particle *next_particle;
 };
 
 struct Particle_compatibility {
@@ -36,7 +27,7 @@ struct Particle_compatibility {
 };
 
 struct ListHead {
-    Particle* head;
+    struct Particle* head;
 };
 
 struct Configuration {
@@ -49,7 +40,6 @@ struct Configuration {
     int NUM_THREADS;
     int SLICE_LENGTH;
     int CELL_SIZE;
-    int TARGET_DISPLAY_FPS;
 };
 
 curandState *states;
@@ -112,7 +102,6 @@ struct Configuration get_configuration() {
     config.SEED = get_json_int_value(json, "seed");
     config.NUM_THREADS = get_json_int_value(json, "num_threads");
     config.CELL_SIZE = get_json_int_value(json, "cell_size");
-    config.TARGET_DISPLAY_FPS = get_json_int_value(json, "target_display_fps");
     config.SLICE_LENGTH = config.NUM_PARTICLES / config.NUM_THREADS;
     return config;
 }
@@ -142,6 +131,7 @@ __global__ void reset_linked_lists(ListHead*** grid) {
     if (row < gridHeight && col < gridWidth) {
         ListHead* cell = grid[row][col];
         cell->head = NULL;
+        cell->last_updated = iteration;
     }
 }
 
@@ -397,6 +387,7 @@ __global__ void initializeGrid(ListHead*** grid) {
     if (row < gridHeight && col < gridWidth) {
         grid[row][col] = (ListHead*)malloc(sizeof(ListHead));
         grid[row][col]->head = NULL;
+        grid[row][col]->last_updated = iteration;
     }
 }
 
@@ -476,13 +467,8 @@ int main() {
         reset_linked_lists<<<blocksPerGrid, threadsPerBlock>>>(d_grid);
         cudaDeviceSynchronize();
 
-        auto end = std::chrono::high_resolution_clock::now();
-        iteration++;
-        if (std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() >= 1000 / config.TARGET_DISPLAY_FPS) {
+        if (iteration % 1000 == 0) {
             cudaMemcpy(local_particles, particles, config.NUM_PARTICLES * sizeof(Particle), cudaMemcpyDeviceToHost);
-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-            std::cout << "Iterations per second: " << iteration / (elapsed / 1000.0) << std::endl;
-            start = std::chrono::high_resolution_clock::now();
             for (int i = 0; i < config.NUM_PARTICLES; i++) {
                 local_particles_compatibility[i].id = local_particles[i].id;
                 local_particles_compatibility[i].x = local_particles[i].x;
@@ -493,7 +479,15 @@ int main() {
                 local_particles_compatibility[i].new_y = local_particles[i].y;
             }
             socket_server_send(socket_holder, local_particles_compatibility, config.NUM_PARTICLES * sizeof(struct Particle_compatibility));
-            iteration = 0;
+        }
+        cudaDeviceSynchronize();
+
+        // printf("Iteration %d\n", iteration++);
+        if (iteration++ % 1000 == 0) {
+            auto end = std::chrono::high_resolution_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+            std::cout << "Iterations per second: " << 1000.0 / (elapsed / 1000.0) << std::endl;
+            start = std::chrono::high_resolution_clock::now();
         }
     }
 
