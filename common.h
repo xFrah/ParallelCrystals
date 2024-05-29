@@ -3,7 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include "libs/cJSON.h"  // Make sure to include the cJSON library header if it's used
+#include "libs/cJSON.h"
 
 // Struct definitions
 typedef struct Particle {
@@ -11,21 +11,8 @@ typedef struct Particle {
     int x;
     int y;
     int walker;
-    int y_index;
-    int new_x;
-    int new_y;
-    struct Particle* next_particle;  // Use 'struct' for self-referential structures
+    struct Particle* next_particle;
 } Particle;
-
-typedef struct Particle_compatibility {
-    int id;
-    int x;
-    int y;
-    int walker;
-    int y_index;
-    int new_x;
-    int new_y;
-} Particle_compatibility;
 
 typedef struct ListHead {
     Particle* head;
@@ -44,10 +31,8 @@ typedef struct Configuration {
     int TARGET_DISPLAY_FPS;
 } Configuration;
 
-// Function declarations
 Configuration get_configuration();
 
-// Inline function to get JSON values and check their existence
 inline int get_json_int_value(cJSON* json_obj, const char* name) {
     cJSON* item = cJSON_GetObjectItem(json_obj, name);
     if (!item) {

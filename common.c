@@ -9,12 +9,12 @@ Configuration get_configuration() {
     fseek(f, 0, SEEK_END);
     long fsize = ftell(f);
     fseek(f, 0, SEEK_SET);
-    char* string = (char*)malloc(fsize + 1);  // Explicit cast to char*
+    char* string = (char*)malloc(fsize + 1);
     fread(string, 1, fsize, f);
     fclose(f);
     string[fsize] = 0;
     cJSON* json = cJSON_Parse(string);
-    free(string);  // Free the allocated memory
+    free(string);
     if (json == NULL) {
         const char* error_ptr = cJSON_GetErrorPtr();
         if (error_ptr != NULL) {

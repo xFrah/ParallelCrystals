@@ -293,8 +293,6 @@ __global__ void init_particles_kernel(Particle* particles, curandState* states) 
         particles[i].x = curand(&states[0]) % d_config.WIDTH;
         particles[i].y = curand(&states[0]) % d_config.HEIGHT;
         particles[i].walker = curand(&states[0]) % 2;
-        particles[i].new_x = particles[i].x;
-        particles[i].new_y = particles[i].y;
         particles[i].next_particle = NULL;
     }
 }
@@ -365,7 +363,6 @@ int main() {
     CHECK_LAST_ERROR();
 
     Particle* local_particles = (Particle*)malloc(config.NUM_PARTICLES * sizeof(Particle));
-    Particle_compatibility* local_particles_compatibility = (Particle_compatibility*)malloc(config.NUM_PARTICLES * sizeof(Particle_compatibility));
 
     auto start = std::chrono::high_resolution_clock::now();
     int iteration = 0;
@@ -391,16 +388,7 @@ int main() {
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
             std::cout << "Iterations per second: " << iteration / (elapsed / 1000.0) << std::endl;
             start = std::chrono::high_resolution_clock::now();
-            for (int i = 0; i < config.NUM_PARTICLES; i++) {
-                local_particles_compatibility[i].id = local_particles[i].id;
-                local_particles_compatibility[i].x = local_particles[i].x;
-                local_particles_compatibility[i].y = local_particles[i].y;
-                local_particles_compatibility[i].walker = local_particles[i].walker;
-                local_particles_compatibility[i].y_index = local_particles[i].y_index;
-                local_particles_compatibility[i].new_x = local_particles[i].x;
-                local_particles_compatibility[i].new_y = local_particles[i].y;
-            }
-            socket_server_send(socket_holder, local_particles_compatibility, config.NUM_PARTICLES * sizeof(struct Particle_compatibility));
+            socket_server_send(socket_holder, local_particles, config.NUM_PARTICLES * sizeof(struct Particle));
             iteration = 0;
         }
     }
