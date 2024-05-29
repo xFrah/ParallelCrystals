@@ -56,6 +56,8 @@ def connect_to_server(address):
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.connect(address)
             print("Connected to server successfully.")
+            global WIDTH, HEIGHT, PARTICLE_RADIUS, PORT, NUM_PARTICLES
+            WIDTH, HEIGHT, PARTICLE_RADIUS, PORT, NUM_PARTICLES = load_config()
             return sock
         except ConnectionRefusedError:
             print("Connection failed. Trying again in 5 seconds...")
