@@ -18,7 +18,7 @@ extern "C" {
 
 struct ListHead {
     Particle* head;
-}
+};
 
 curandState* states;
 __device__ Configuration d_config;
