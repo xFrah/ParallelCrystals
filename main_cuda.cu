@@ -13,45 +13,8 @@
 extern "C" {
 #include "libs/cJSON.h"
 #include "libs/win_socket_server.h"
+#include "common.h"
 }
-
-struct Particle {
-    int id;
-    int x;
-    int y;
-    int walker;
-    int y_index;
-    int new_x;
-    int new_y;
-    Particle* next_particle;
-};
-
-struct Particle_compatibility {
-    int id;
-    int x;
-    int y;
-    int walker;
-    int y_index;
-    int new_x;
-    int new_y;
-};
-
-struct ListHead {
-    Particle* head;
-};
-
-struct Configuration {
-    int PORT;
-    int WIDTH;
-    int HEIGHT;
-    int NUM_PARTICLES;
-    int PARTICLE_RADIUS;
-    int SEED;
-    int NUM_THREADS;
-    int SLICE_LENGTH;
-    int CELL_SIZE;
-    int TARGET_DISPLAY_FPS;
-};
 
 curandState* states;
 __device__ Configuration d_config;
@@ -63,58 +26,6 @@ int gridHeight_host;
 int gridWidth_host;
 int cellSize_host;
 Particle* particles;
-
-extern "C" struct Configuration get_configuration();
-
-// Inline function to get JSON values and check their existence
-inline int get_json_int_value(cJSON* json_obj, const char* name) {
-    cJSON* item = cJSON_GetObjectItem(json_obj, name);
-    if (!item) {
-        fprintf(stderr, "Missing configuration item: %s\n", name);
-        cJSON_Delete(json_obj);
-        exit(EXIT_FAILURE);
-    }
-    return item->valueint;
-}
-
-struct Configuration get_configuration() {
-    FILE* f = fopen("config.json", "r");
-    if (f == NULL) {
-        printf("Error configuration opening file\n");
-        exit(1);
-    }
-    fseek(f, 0, SEEK_END);
-    long fsize = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    char* string = (char*)malloc(fsize + 1);  // Explicit cast to char*
-    fread(string, 1, fsize, f);
-    fclose(f);
-    string[fsize] = 0;
-    cJSON* json = cJSON_Parse(string);
-    free(string);  // Free the allocated memory
-    if (json == NULL) {
-        const char* error_ptr = cJSON_GetErrorPtr();
-        if (error_ptr != NULL) {
-            fprintf(stderr, "Error before: %s\n", error_ptr);
-        }
-        exit(1);
-    }
-
-    cJSON_Delete(json);
-
-    struct Configuration config;
-    config.PORT = get_json_int_value(json, "network_port");
-    config.HEIGHT = get_json_int_value(json, "screen_height");
-    config.WIDTH = get_json_int_value(json, "screen_width");
-    config.NUM_PARTICLES = get_json_int_value(json, "num_particles");
-    config.PARTICLE_RADIUS = get_json_int_value(json, "particle_radius");
-    config.SEED = get_json_int_value(json, "seed");
-    config.NUM_THREADS = get_json_int_value(json, "num_threads");
-    config.CELL_SIZE = get_json_int_value(json, "cell_size");
-    config.TARGET_DISPLAY_FPS = get_json_int_value(json, "target_display_fps");
-    config.SLICE_LENGTH = config.NUM_PARTICLES / config.NUM_THREADS;
-    return config;
-}
 
 #define CHECK_CUDA_ERROR(call)                                                \
     {                                                                         \
