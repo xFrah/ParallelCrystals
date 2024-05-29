@@ -32,15 +32,6 @@ typedef struct Configuration {
 } Configuration;
 
 Configuration get_configuration();
-
-inline int get_json_int_value(cJSON* json_obj, const char* name) {
-    cJSON* item = cJSON_GetObjectItem(json_obj, name);
-    if (!item) {
-        fprintf(stderr, "Missing configuration item: %s\n", name);
-        cJSON_Delete(json_obj);
-        exit(EXIT_FAILURE);
-    }
-    return item->valueint;
-}
+int get_json_int_value(cJSON* json_obj, const char* name);
 
 #endif // COMMON_H

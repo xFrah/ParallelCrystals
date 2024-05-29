@@ -1,5 +1,15 @@
 #include "common.h"
 
+int get_json_int_value(cJSON* json_obj, const char* name) {
+    cJSON* item = cJSON_GetObjectItem(json_obj, name);
+    if (!item) {
+        fprintf(stderr, "Missing configuration item: %s\n", name);
+        cJSON_Delete(json_obj);
+        exit(EXIT_FAILURE);
+    }
+    return item->valueint;
+}
+
 Configuration get_configuration() {
     FILE* f = fopen("config.json", "r");
     if (f == NULL) {
