@@ -5,7 +5,7 @@ gcc main.c socket_server.c cJSON.c -o a.out -Wall -lpthread -g
 ```
 ##### CUDA
 ```bash
-nvcc main_cuda.cu cJSON.c win_socket_server.c -o cuda && cuda.exe
+nvcc main_cuda.cu libs/cJSON.c libs/win_socket_server.c -o main_cuda && main_cuda.exe
 ```
 #### OpenMP
 ```bash
@@ -16,8 +16,3 @@ gcc -fopenmp -o openmp main_openmp.c && openmp.exe
 ```bash
 python3 displayer.py
 ```
-
-
-## Lil diagram
-
-![diagram](diagram.png)
