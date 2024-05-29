@@ -1,17 +1,18 @@
+#include <cooperative_groups.h>
 #include <cuda_runtime.h>
 #include <curand_kernel.h>
 #include <windows.h>
-#include <cooperative_groups.h>
-#include <iostream>
+
 #include <chrono>
+#include <iostream>
 
 // Define kernel launch parameters
 #define numBlocks_ 68
 #define threadsPerBlock_ 32
 
 extern "C" {
-    #include "libs/cJSON.h"
-    #include "libs/win_socket_server.h"
+#include "libs/cJSON.h"
+#include "libs/win_socket_server.h"
 }
 
 struct Particle {
@@ -22,7 +23,7 @@ struct Particle {
     int y_index;
     int new_x;
     int new_y;
-    Particle *next_particle;
+    Particle* next_particle;
 };
 
 struct Particle_compatibility {
@@ -52,18 +53,16 @@ struct Configuration {
     int TARGET_DISPLAY_FPS;
 };
 
-curandState *states;
+curandState* states;
 __device__ Configuration d_config;
 __device__ int gridHeight;
 __device__ int gridWidth;
 __device__ int cellSize;
-__device__ int iteration = 1;
 struct Configuration config;
 int gridHeight_host;
 int gridWidth_host;
 int cellSize_host;
-Particle *particles;
-
+Particle* particles;
 
 extern "C" struct Configuration get_configuration();
 
@@ -79,7 +78,7 @@ inline int get_json_int_value(cJSON* json_obj, const char* name) {
 }
 
 struct Configuration get_configuration() {
-    FILE *f = fopen("config.json", "r");
+    FILE* f = fopen("config.json", "r");
     if (f == NULL) {
         printf("Error configuration opening file\n");
         exit(1);
@@ -87,14 +86,14 @@ struct Configuration get_configuration() {
     fseek(f, 0, SEEK_END);
     long fsize = ftell(f);
     fseek(f, 0, SEEK_SET);
-    char *string = (char*)malloc(fsize + 1); // Explicit cast to char*
+    char* string = (char*)malloc(fsize + 1);  // Explicit cast to char*
     fread(string, 1, fsize, f);
     fclose(f);
     string[fsize] = 0;
-    cJSON *json = cJSON_Parse(string);
-    free(string); // Free the allocated memory
+    cJSON* json = cJSON_Parse(string);
+    free(string);  // Free the allocated memory
     if (json == NULL) {
-        const char *error_ptr = cJSON_GetErrorPtr();
+        const char* error_ptr = cJSON_GetErrorPtr();
         if (error_ptr != NULL) {
             fprintf(stderr, "Error before: %s\n", error_ptr);
         }
@@ -117,23 +116,25 @@ struct Configuration get_configuration() {
     return config;
 }
 
-#define CHECK_CUDA_ERROR(call) {                                          \
-    cudaError_t err = call;                                               \
-    if (err != cudaSuccess) {                                             \
-        std::cerr << "CUDA error in " << __FILE__ << " at line "          \
-                  << __LINE__ << ": " << cudaGetErrorString(err) << "\n"; \
-        exit(err);                                                        \
-    }                                                                     \
-}
+#define CHECK_CUDA_ERROR(call)                                                \
+    {                                                                         \
+        cudaError_t err = call;                                               \
+        if (err != cudaSuccess) {                                             \
+            std::cerr << "CUDA error in " << __FILE__ << " at line "          \
+                      << __LINE__ << ": " << cudaGetErrorString(err) << "\n"; \
+            exit(err);                                                        \
+        }                                                                     \
+    }
 
-#define CHECK_LAST_ERROR() {                                              \
-    cudaError_t err = cudaGetLastError();                                 \
-    if (err != cudaSuccess) {                                             \
-        std::cerr << "CUDA error in " << __FILE__ << " at line "          \
-                  << __LINE__ << ": " << cudaGetErrorString(err) << "\n"; \
-        exit(err);                                                        \
-    }                                                                     \
-}
+#define CHECK_LAST_ERROR()                                                    \
+    {                                                                         \
+        cudaError_t err = cudaGetLastError();                                 \
+        if (err != cudaSuccess) {                                             \
+            std::cerr << "CUDA error in " << __FILE__ << " at line "          \
+                      << __LINE__ << ": " << cudaGetErrorString(err) << "\n"; \
+            exit(err);                                                        \
+        }                                                                     \
+    }
 
 __global__ void reset_linked_lists(ListHead*** grid) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
@@ -148,20 +149,18 @@ __global__ void reset_linked_lists(ListHead*** grid) {
 __device__ void appendNode(ListHead* listHead, Particle* newHead) {
     Particle* oldHead;
     do {
-        oldHead = listHead->head;  // Read the current head
+        oldHead = listHead->head;          // Read the current head
         newHead->next_particle = oldHead;  // Set the new node's next to the current head
     } while (atomicCAS((unsigned long long int*)&(listHead->head), (unsigned long long int)oldHead, (unsigned long long int)newHead) != (unsigned long long int)oldHead);
 }
 
-
 __global__ void makeLinkedLists(ListHead*** grid, Particle* particles) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx == 0) iteration++;
     int num_threads = blockDim.x * gridDim.x;
     int start = (idx * d_config.NUM_PARTICLES) / num_threads;
     int end = ((idx + 1) * d_config.NUM_PARTICLES) / num_threads;
     int gridX, gridY;
-    Particle *p;
+    Particle* p;
 
     for (int i = start; i < end; i++) {
         p = &particles[i];
@@ -203,7 +202,7 @@ __global__ void sort_single_cell_insertionSort(ListHead*** grid) {
         Particle* sorted = NULL;
         Particle* current = head;
         int depth = 0;  // Depth counter for cycle detection
-        
+
         while (current != NULL) {
             depth++;
             if (depth > MAX_DEPTH) {
@@ -211,7 +210,7 @@ __global__ void sort_single_cell_insertionSort(ListHead*** grid) {
                 assert(0);
                 break;
             }
-            
+
             Particle* next = current->next_particle;
             if (sorted == NULL || current->x < sorted->x) {
                 current->next_particle = sorted;
@@ -255,10 +254,9 @@ __global__ void sort_single_cell_insertionSort(ListHead*** grid) {
     }
 }
 
-
-__device__ void check_collisions(ListHead *cell1, ListHead *cell2) {
-    Particle *p1 = cell1->head;
-    Particle *pj = cell2->head;
+__device__ void check_collisions(ListHead* cell1, ListHead* cell2) {
+    Particle* p1 = cell1->head;
+    Particle* pj = cell2->head;
     int threshold = d_config.PARTICLE_RADIUS;
 
     while (p1 != NULL && pj != NULL) {
@@ -266,7 +264,7 @@ __device__ void check_collisions(ListHead *cell1, ListHead *cell2) {
             pj = pj->next_particle;
         }
 
-        Particle *pk = pj;
+        Particle* pk = pj;
         while (pk != NULL && pk->x <= p1->x + threshold) {
             if (p1->walker != pk->walker && abs(p1->y - pk->y) <= threshold) {
                 printf("Collision between particles %d and %d\n", p1->id, pk->id);
@@ -286,7 +284,7 @@ __global__ void check_for_collisions(ListHead*** grid) {
     if (row < gridHeight && col < gridWidth) {
         ListHead* cell = grid[row][col];
         // check what kind of cell this is
-        if (row == 0 && col == 0) {  
+        if (row == 0 && col == 0) {
             // top left corner: compare with cell at the right, cell below, cell at bottom right
             check_collisions(cell, grid[row][col + 1]);
             check_collisions(cell, grid[row + 1][col]);
@@ -361,12 +359,12 @@ __global__ void print_linked_lists(ListHead*** grid) {
     }
 }
 
-__global__ void move_particles_kernel(Particle *particles, curandState *states) {
+__global__ void move_particles_kernel(Particle* particles, curandState* states) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int num_threads = blockDim.x * gridDim.x;
     int start = (idx * d_config.NUM_PARTICLES) / num_threads;
     int end = ((idx + 1) * d_config.NUM_PARTICLES) / num_threads;
-    for (int i = start; i < end; i++) { // move particles
+    for (int i = start; i < end; i++) {  // move particles
         if (particles[i].walker) {
             particles[i].x = particles[i].x + 1 + (-2 * (curand(&states[idx]) % 2));
             particles[i].y = particles[i].y + 1 + (-2 * (curand(&states[idx]) % 2));
@@ -375,7 +373,7 @@ __global__ void move_particles_kernel(Particle *particles, curandState *states) 
     }
 }
 
-__global__ void init_particles_kernel(Particle *particles, curandState *states) {
+__global__ void init_particles_kernel(Particle* particles, curandState* states) {
     for (int i = 0; i < numBlocks_ * threadsPerBlock_; i++) {
         curand_init(d_config.SEED, i, 0, &states[i]);
     }
@@ -431,7 +429,6 @@ ListHead*** allocate_memory() {
     return d_grid;
 }
 
-
 int main() {
     config = get_configuration();
     cellSize_host = config.CELL_SIZE;
@@ -456,8 +453,8 @@ int main() {
     cudaDeviceSynchronize();
     CHECK_LAST_ERROR();
 
-    Particle * local_particles = (Particle *)malloc(config.NUM_PARTICLES * sizeof(Particle));
-    Particle_compatibility * local_particles_compatibility = (Particle_compatibility *)malloc(config.NUM_PARTICLES * sizeof(Particle_compatibility));
+    Particle* local_particles = (Particle*)malloc(config.NUM_PARTICLES * sizeof(Particle));
+    Particle_compatibility* local_particles_compatibility = (Particle_compatibility*)malloc(config.NUM_PARTICLES * sizeof(Particle_compatibility));
 
     auto start = std::chrono::high_resolution_clock::now();
     int iteration = 0;
