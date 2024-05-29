@@ -14,10 +14,6 @@ typedef struct Particle {
     struct Particle* next_particle;
 } Particle;
 
-typedef struct ListHead {
-    Particle* head;
-} ListHead;
-
 typedef struct Configuration {
     int PORT;
     int WIDTH;

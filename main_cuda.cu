@@ -16,6 +16,10 @@ extern "C" {
 #include "common.h"
 }
 
+struct ListHead {
+    Particle* head;
+}
+
 curandState* states;
 __device__ Configuration d_config;
 __device__ int gridHeight;
