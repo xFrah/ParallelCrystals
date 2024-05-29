@@ -191,7 +191,7 @@ __global__ void sort_single_cell_insertionSort(ListHead*** grid) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
 
-    const int MAX_DEPTH = 1000;  // Maximum depth to prevent infinite loop
+    const int MAX_DEPTH = d_config.NUM_PARTICLES + (d_config.NUM_PARTICLES * 0.2);  // Maximum depth to prevent infinite loop
 
     if (row < gridHeight && col < gridWidth) {
         ListHead* cell = grid[row][col];
