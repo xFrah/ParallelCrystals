@@ -79,7 +79,7 @@ def sort_lists():
 
 
 def check_collisions(cell1: List[Particle], cell2: List[Particle], cell2_position: Tuple[int, int]):
-    global current_collision, current_checked_cell, current_particle
+    global current_collision, current_checked_cell, current_particle, current_threshold
     current_checked_cell = cell2_position
     time.sleep(0.5)
     i, j = 0, 0
@@ -91,7 +91,12 @@ def check_collisions(cell1: List[Particle], cell2: List[Particle], cell2_positio
             j += 1
 
         k = j
+        if k < len(cell2) and not (cell2[k].x <= p1.x + PARTICLE_RADIUS):
+            current_collision = (p1, cell2[k])
+            current_threshold = cell2[j].x
+            time.sleep(0.5)
         while k < len(cell2) and cell2[k].x <= p1.x + PARTICLE_RADIUS:
+            current_threshold = cell2[j].x
             p2 = cell2[k]
             current_collision = (p1, p2)
             if p1.walker != p2.walker:
@@ -100,17 +105,22 @@ def check_collisions(cell1: List[Particle], cell2: List[Particle], cell2_positio
                     p1.walker = False
                     p2.walker = False
             k += 1
+        if k < len(cell2) and not (cell2[k].x <= p1.x + PARTICLE_RADIUS):
+            current_collision = (p1, cell2[k])
+            current_threshold = cell2[j].x
+            time.sleep(0.5)
 
         i += 1
     current_collision = None
     current_checked_cell = None
+    current_threshold = None
+    current_particle = None
 
 
 def check_for_collisions():
     global current_cell
     for row in range(gridHeight):
         for col in range(gridWidth):
-            print(row, col)
             cell = grid[row][col]
             current_cell = (row, col)
             if row == 0 and col == 0:
@@ -216,6 +226,14 @@ if __name__ == "__main__":
 
         if current_collision:
             pygame.draw.line(screen, yellow, (current_collision[0].x, current_collision[0].y), (current_collision[1].x, current_collision[1].y), 2)
+
+        # if current_threshold:
+        #     # draw vertical line at x = current_threshold and spanning 50 pixels
+        #     pygame.draw.line(screen, dark_red, (current_threshold, 0), (current_threshold, HEIGHT), 2)
+
+        if current_particle:
+            # draw circle around current_particle
+            pygame.draw.circle(screen, yellow, (current_particle.x, current_particle.y), PARTICLE_RADIUS + 2, 2)
 
         pygame.display.update()
         clock.tick(60)
