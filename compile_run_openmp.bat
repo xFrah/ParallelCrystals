@@ -1,0 +1,1 @@
+gcc -fopenmp main_openmp.cpp common.c libs/cJSON.c libs/win_socket_server.c -o main_openmp -lstdc++ -lws2_32 -static && main_openmp.exe

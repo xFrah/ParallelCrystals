@@ -25,6 +25,8 @@ typedef struct Configuration {
     int SLICE_LENGTH;
     int CELL_SIZE;
     int TARGET_DISPLAY_FPS;
+    int SHOW_VISUALLY;
+    int USE_MAX_HARDWARE_THREADS;
 } Configuration;
 
 Configuration get_configuration();

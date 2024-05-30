@@ -279,16 +279,23 @@ int main() {
     gridHeight = config.HEIGHT / cellSize;
     gridWidth = config.WIDTH / cellSize;
 
-    // get number of real hardware threads
-    int num_threads = omp_get_max_threads();
-    std::cout << "Number of threads: " << num_threads << std::endl;
-    // set number of threads to number of real hardware threads
-    omp_set_num_threads(num_threads);
+    if (config.USE_MAX_HARDWARE_THREADS) {
+        int num_threads = omp_get_max_threads();
+        std::cout << "Using maximum hardware threads: " << num_threads << "\n";
+        omp_set_num_threads(num_threads);
+    } else {
+        omp_set_num_threads(config.NUM_THREADS);
+        std::cout << "Using " << config.NUM_THREADS << " threads\n";
+    }
 
-    int socket_holder = socket_server_start(config.PORT);
-    if (socket_holder < 0) {
-        std::cerr << "Failed to start socket server\n";
-        return -1;
+    int socket_holder;
+    if (config.SHOW_VISUALLY) {
+        std::cout << "Starting socket server on port " << config.PORT << "\n";
+        socket_holder = socket_server_start(config.PORT);
+        if (socket_holder < 0) {
+            std::cerr << "Failed to start socket server\n";
+            return -1;
+        }
     }
 
     allocate_memory();
@@ -297,10 +304,8 @@ int main() {
 
     auto start = std::chrono::high_resolution_clock::now();
     int iteration = 0;
-    
-    // return 0;
 
-    #pragma omp parallel
+#pragma omp parallel
     {
 
         while (1) {
@@ -311,7 +316,7 @@ int main() {
             reset_linked_lists();
             // print_linked_lists();
 
-            #pragma omp single
+#pragma omp single
             {
                 auto end = std::chrono::high_resolution_clock::now();
                 iteration++;
@@ -319,7 +324,9 @@ int main() {
                     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
                     std::cout << "Iterations per second: " << iteration / (elapsed / 1000.0) << std::endl;
                     start = std::chrono::high_resolution_clock::now();
-                    // socket_server_send(socket_holder, particles, config.NUM_PARTICLES * sizeof(struct Particle));
+                    if (config.SHOW_VISUALLY){
+                        socket_server_send(socket_holder, particles, config.NUM_PARTICLES * sizeof(struct Particle));
+                    }
                     iteration = 0;
                 }
             }

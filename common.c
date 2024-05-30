@@ -43,6 +43,8 @@ Configuration get_configuration() {
     config.NUM_THREADS = get_json_int_value(json, "num_threads");
     config.CELL_SIZE = get_json_int_value(json, "cell_size");
     config.TARGET_DISPLAY_FPS = get_json_int_value(json, "target_display_fps");
+    config.SHOW_VISUALLY = get_json_int_value(json, "show_visually");
+    config.USE_MAX_HARDWARE_THREADS = get_json_int_value(json, "use_max_hardware_threads");
     config.SLICE_LENGTH = config.NUM_PARTICLES / config.NUM_THREADS;
 
     cJSON_Delete(json);

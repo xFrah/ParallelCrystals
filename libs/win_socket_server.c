@@ -23,8 +23,6 @@ void cleanup_winsock() {
 int socket_server_start(int port) {
     init_winsock();
 
-    printf("Starting server\n");
-
     // Creating socket file descriptor
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == INVALID_SOCKET) {
@@ -38,8 +36,6 @@ int socket_server_start(int port) {
     int addrlen = sizeof(address);
     int opt = 1;
 
-    printf("Socket created\n");
-
     // Forcefully attaching socket to the port
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (char*)&opt, sizeof(opt)) == SOCKET_ERROR) {
         perror("setsockopt");
@@ -48,13 +44,9 @@ int socket_server_start(int port) {
         exit(EXIT_FAILURE);
     }
 
-    printf("Socket options set\n");
-
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(port);
-
-    printf("Address set\n");
 
     // Binding socket to the port
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) == SOCKET_ERROR) {
@@ -64,8 +56,6 @@ int socket_server_start(int port) {
         exit(EXIT_FAILURE);
     }
 
-    printf("Socket bound\n");
-
     if (listen(server_fd, 3) == SOCKET_ERROR) {
         perror("listen");
         closesocket(server_fd);
@@ -73,7 +63,7 @@ int socket_server_start(int port) {
         exit(EXIT_FAILURE);
     }
 
-    printf("Listening\n");
+    printf("Listening on socket\n");
 
     while (1) {
         new_socket = accept(server_fd, (struct sockaddr *)&address, &addrlen);

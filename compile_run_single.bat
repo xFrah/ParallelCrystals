@@ -1,0 +1,1 @@
+gcc main.cpp common.c libs/cJSON.c libs/win_socket_server.c -o main -lstdc++ -lws2_32 -static && main.exe
