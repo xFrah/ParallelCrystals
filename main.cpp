@@ -7,12 +7,10 @@ extern "C" {
 #include "common.h"
 #include "libs/cJSON.h"
 #include "libs/win_socket_server.h"
-#include <omp.h>
 }
 
 typedef struct ListHead {
     Particle *head;
-    omp_lock_t lock;
 } ListHead;
 
 struct Configuration config;
@@ -23,7 +21,6 @@ Particle *particles;
 ListHead ***grid;
 
 void reset_linked_lists() {
-#pragma omp parallel for
     for (int i = 0; i < gridHeight; i++) {
         for (int j = 0; j < gridWidth; j++) {
             ListHead *current = grid[i][j];
@@ -33,15 +30,12 @@ void reset_linked_lists() {
 }
 
 void append_node(ListHead *listHead, Particle *newHead) {
-    omp_set_lock(&(listHead->lock));
     Particle *oldHead = listHead->head;
     newHead->next_particle = oldHead;
     listHead->head = newHead;
-    omp_unset_lock(&(listHead->lock));
 }
 
 void make_linked_lists() {
-#pragma omp parallel for
     for (int i = 0; i < config.NUM_PARTICLES; i++) {
         int x = particles[i].x / cellSize;
         int y = particles[i].y / cellSize;
@@ -64,7 +58,6 @@ void make_linked_lists() {
 void sort_single_cell_insertionSort() {
     const int MAX_DEPTH = config.NUM_PARTICLES + (config.NUM_PARTICLES * 0.2); // Maximum depth to prevent infinite loop
 
-#pragma omp parallel for
     for (int row = 0; row < gridHeight; row++) {
         for (int col = 0; col < gridWidth; col++) {
             ListHead *cell = grid[row][col];
@@ -155,7 +148,6 @@ void check_collisions(ListHead *cell1, ListHead *cell2) {
 }
 
 void check_for_collisions() {
-#pragma omp parallel for
     for (int row = 0; row < gridHeight; row++) {
         for (int col = 0; col < gridWidth; col++) {
             // std::cout << "Checking for collisions in cell (" << row << ", " << col << ")\n";
@@ -214,7 +206,6 @@ void check_for_collisions() {
 }
 
 void print_linked_lists() {
-#pragma omp critical
     for (int i = 0; i < gridHeight; i++) {
         for (int j = 0; j < gridWidth; j++) {
             ListHead *current = grid[i][j];
@@ -233,7 +224,6 @@ void print_linked_lists() {
 }
 
 void move_particles() {
-#pragma omp parallel for
     for (int i = 0; i < config.NUM_PARTICLES; i++) {
         if (particles[i].walker) {
             particles[i].x = particles[i].x + 1 + (-2 * (rand() % 2));
@@ -258,7 +248,6 @@ void initializeGrid() {
         for (int j = 0; j < gridWidth; j++) {
             grid[i][j] = (ListHead *)malloc(sizeof(ListHead));
             grid[i][j]->head = NULL;
-            omp_init_lock(&(grid[i][j]->lock));
         }
     }
     std::cout << "Initialized grid\n";
@@ -292,31 +281,21 @@ int main() {
     auto start = std::chrono::high_resolution_clock::now();
     int iteration = 0;
 
-    // #pragma omp parallel
-    {
+    while (1) {
+        make_linked_lists();
+        sort_single_cell_insertionSort();
+        check_for_collisions();
+        move_particles();
+        reset_linked_lists();
 
-        while (1) {
-            make_linked_lists();
-            // print_linked_lists();
-            sort_single_cell_insertionSort();
-            check_for_collisions();
-            move_particles();
-            reset_linked_lists();
-            // print_linked_lists();
-            // return 0;
-
-            // #pragma omp single
-            {
-                auto end = std::chrono::high_resolution_clock::now();
-                iteration++;
-                if (std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() >= 1000 / config.TARGET_DISPLAY_FPS) {
-                    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-                    std::cout << "Iterations per second: " << iteration / (elapsed / 1000.0) << std::endl;
-                    start = std::chrono::high_resolution_clock::now();
-                    socket_server_send(socket_holder, particles, config.NUM_PARTICLES * sizeof(struct Particle));
-                    iteration = 0;
-                }
-            }
+        auto end = std::chrono::high_resolution_clock::now();
+        iteration++;
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() >= 1000 / config.TARGET_DISPLAY_FPS) {
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+            std::cout << "Iterations per second: " << iteration / (elapsed / 1000.0) << std::endl;
+            start = std::chrono::high_resolution_clock::now();
+            socket_server_send(socket_holder, particles, config.NUM_PARTICLES * sizeof(struct Particle));
+            iteration = 0;
         }
     }
 

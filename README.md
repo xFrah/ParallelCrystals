@@ -6,7 +6,7 @@ nvcc main_cuda.cu common.c libs/cJSON.c libs/win_socket_server.c -o main_cuda &&
 ```
 ##### OpenMP
 ```bash
-gcc -Wall -Wextra -g -fopenmp main_openmp.cpp common.c libs/cJSON.c libs/win_socket_server.c -o main_openmp -lstdc++ -lws2_32 && main_openmp.exe
+gcc -fopenmp main_openmp.cpp common.c libs/cJSON.c libs/win_socket_server.c -o main_openmp -lstdc++ -lws2_32 && main_openmp.exe
 ```
 
 ## For running the "frontend":
