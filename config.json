@@ -1,9 +1,9 @@
 {
     "screen_height": 1000,
     "screen_width": 1000,
-    "num_particles": 10000,
-    "num_threads": 100,
-    "particle_radius": 5,
+    "num_particles": 100000,
+    "num_threads": 8,
+    "particle_radius": 2,
     "seed": 17,
     "network_port": 7000,
     "cell_size": 10,

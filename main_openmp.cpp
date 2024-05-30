@@ -23,7 +23,7 @@ Particle *particles;
 ListHead ***grid;
 
 void reset_linked_lists() {
-#pragma omp parallel for
+#pragma omp for
     for (int i = 0; i < gridHeight; i++) {
         for (int j = 0; j < gridWidth; j++) {
             ListHead *current = grid[i][j];
@@ -41,7 +41,7 @@ void append_node(ListHead *listHead, Particle *newHead) {
 }
 
 void make_linked_lists() {
-#pragma omp parallel for
+#pragma omp for
     for (int i = 0; i < config.NUM_PARTICLES; i++) {
         int x = particles[i].x / cellSize;
         int y = particles[i].y / cellSize;
@@ -64,7 +64,7 @@ void make_linked_lists() {
 void sort_single_cell_insertionSort() {
     const int MAX_DEPTH = config.NUM_PARTICLES + (config.NUM_PARTICLES * 0.2); // Maximum depth to prevent infinite loop
 
-#pragma omp parallel for
+#pragma omp for
     for (int row = 0; row < gridHeight; row++) {
         for (int col = 0; col < gridWidth; col++) {
             ListHead *cell = grid[row][col];
@@ -144,7 +144,7 @@ void check_collisions(ListHead *cell1, ListHead *cell2) {
         Particle *pk = pj;
         while (pk != NULL && pk->x <= p1->x + threshold) {
             if (p1->walker != pk->walker && abs(p1->y - pk->y) <= threshold) {
-                printf("Collision between particles %d and %d\n", p1->id, pk->id);
+                // printf("Collision between particles %d and %d\n", p1->id, pk->id);
                 p1->walker = 0;
                 pk->walker = 0;
             }
@@ -155,7 +155,7 @@ void check_collisions(ListHead *cell1, ListHead *cell2) {
 }
 
 void check_for_collisions() {
-#pragma omp parallel for
+#pragma omp for
     for (int row = 0; row < gridHeight; row++) {
         for (int col = 0; col < gridWidth; col++) {
             // std::cout << "Checking for collisions in cell (" << row << ", " << col << ")\n";
@@ -233,7 +233,7 @@ void print_linked_lists() {
 }
 
 void move_particles() {
-#pragma omp parallel for
+#pragma omp for
     for (int i = 0; i < config.NUM_PARTICLES; i++) {
         if (particles[i].walker) {
             particles[i].x = particles[i].x + 1 + (-2 * (rand() % 2));
@@ -279,6 +279,12 @@ int main() {
     gridHeight = config.HEIGHT / cellSize;
     gridWidth = config.WIDTH / cellSize;
 
+    // get number of real hardware threads
+    int num_threads = omp_get_max_threads();
+    std::cout << "Number of threads: " << num_threads << std::endl;
+    // set number of threads to number of real hardware threads
+    omp_set_num_threads(num_threads);
+
     int socket_holder = socket_server_start(config.PORT);
     if (socket_holder < 0) {
         std::cerr << "Failed to start socket server\n";
@@ -291,21 +297,21 @@ int main() {
 
     auto start = std::chrono::high_resolution_clock::now();
     int iteration = 0;
+    
+    // return 0;
 
-    // #pragma omp parallel
+    #pragma omp parallel
     {
 
         while (1) {
             make_linked_lists();
-            // print_linked_lists();
             sort_single_cell_insertionSort();
             check_for_collisions();
             move_particles();
             reset_linked_lists();
             // print_linked_lists();
-            // return 0;
 
-            // #pragma omp single
+            #pragma omp single
             {
                 auto end = std::chrono::high_resolution_clock::now();
                 iteration++;
@@ -313,7 +319,7 @@ int main() {
                     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
                     std::cout << "Iterations per second: " << iteration / (elapsed / 1000.0) << std::endl;
                     start = std::chrono::high_resolution_clock::now();
-                    socket_server_send(socket_holder, particles, config.NUM_PARTICLES * sizeof(struct Particle));
+                    // socket_server_send(socket_holder, particles, config.NUM_PARTICLES * sizeof(struct Particle));
                     iteration = 0;
                 }
             }

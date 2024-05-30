@@ -106,7 +106,7 @@ void printArray(int arr[], int size) {
 }
 
 int main() {
-    int size = 100000000;
+    int size = 1000000000;
     // create random array
     int *arr = (int *)malloc(size * sizeof(int));
     for (int i = 0; i < size; i++) {
@@ -115,15 +115,15 @@ int main() {
 
     double start, end;
 
-    // Measure performance of sequential merge sort
-    int *seq_arr = (int *)malloc(size * sizeof(int));
-    for (int i = 0; i < size; i++) {
-        seq_arr[i] = arr[i];
-    }
-    start = omp_get_wtime();
-    merge_sort(seq_arr, 0, size - 1, 0); // Depth 0 for sequential version
-    end = omp_get_wtime();
-    printf("Sequential merge sort time: %f\n", end - start);
+    // // Measure performance of sequential merge sort
+    // int *seq_arr = (int *)malloc(size * sizeof(int));
+    // for (int i = 0; i < size; i++) {
+    //     seq_arr[i] = arr[i];
+    // }
+    // start = omp_get_wtime();
+    // merge_sort(seq_arr, 0, size - 1, 0); // Depth 0 for sequential version
+    // end = omp_get_wtime();
+    // printf("Sequential merge sort time: %f\n", end - start);
 
     // Measure performance of parallel merge sort
     int *par_arr = (int *)malloc(size * sizeof(int));
@@ -142,7 +142,7 @@ int main() {
     // printf("Parallel sorted array:\n");
     // printArray(par_arr, size);
 
-    free(seq_arr);
+    // free(seq_arr);
     free(par_arr);
     free(arr);
 

@@ -137,7 +137,7 @@ void check_collisions(ListHead *cell1, ListHead *cell2) {
         Particle *pk = pj;
         while (pk != NULL && pk->x <= p1->x + threshold) {
             if (p1->walker != pk->walker && abs(p1->y - pk->y) <= threshold) {
-                printf("Collision between particles %d and %d\n", p1->id, pk->id);
+                // printf("Collision between particles %d and %d\n", p1->id, pk->id);
                 p1->walker = 0;
                 pk->walker = 0;
             }
@@ -294,7 +294,7 @@ int main() {
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
             std::cout << "Iterations per second: " << iteration / (elapsed / 1000.0) << std::endl;
             start = std::chrono::high_resolution_clock::now();
-            socket_server_send(socket_holder, particles, config.NUM_PARTICLES * sizeof(struct Particle));
+            // socket_server_send(socket_holder, particles, config.NUM_PARTICLES * sizeof(struct Particle));
             iteration = 0;
         }
     }
