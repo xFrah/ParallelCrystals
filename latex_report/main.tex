@@ -1,0 +1,122 @@
+\documentclass[12pt,a4paper,oneside]{article}
+\usepackage{graphicx}
+\usepackage{titlepic}
+\usepackage[utf8]{inputenc}
+\usepackage[left=1.1in,right=1.1in, top=1in, bottom= 1in]{geometry}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{etoolbox}
+\usepackage[nottoc]{tocbibind}
+\usepackage{appendix}
+\usepackage{multicol}
+\usepackage{leftidx}
+\graphicspath{{figures/}}
+\usepackage{ragged2e}
+\usepackage{mathtools}
+\usepackage{units}
+\usepackage{float}
+\usepackage{subcaption}
+\usepackage{commath}
+
+\usepackage{amsthm}
+
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
+
+\newtheorem{theorem}{Theorem}
+
+\usepackage[none]{hyphenat} % Avoids to go out of margin
+
+\usepackage{subfiles}
+
+% --------------------------------------------- %
+
+\title{Simulazione Crescita Cristallina}	% Title
+\author{Francesco Di Monaco (1988475)  \\ Vincenzo Malanga (2024764)} % Authors separated by \\
+\date{30/05/2024}	% Date
+
+% Font size of figure smaller than normal size:
+\usepackage{caption}
+\captionsetup[figure]{font=small}
+%\captionsetup[table]{font=small}
+
+%\usepackage{setspace} % double spacing
+\linespread{1.2}
+
+\makeatletter
+\let\thetitle\@title
+\let\theauthor\@author
+\let\thedate\@date
+\makeatother
+
+\begin{document}
+
+\include{title}
+\newpage
+\tableofcontents
+\newpage
+
+\section{Descrizione del progetto}
+Diffusion-limited aggregation (DLA) è un processo di formazione di cristalli nel quale le particelle si muovono in uno spazio 2D con moto browniano (cioè in modo casuale) e si combinano tra loro quando si toccano. DLA può essere simulato utilizzando una griglia 2D in cui ogni cella può essere occupata da uno o più particelle in movimento. 
+Una particella diventa parte di un cristallo (e si ferma) quando si trova in prossimità di un cristallo già formato. I parametri di base della simulazione sono la dimensione della griglia 2D, il numero iniziale di particelle, il numero di iterazioni e il "seme" cristallino iniziale.
+Per la nostra simulazione abbiamo deciso di utilizzare i framework OpenMP e CUDA.
+
+\section{Il nostro approccio}
+La nostra intenzione era quella di dare alle particelle la possibilità di muoversi in qualunque punto dello spazio indipendentemente dalla griglia. Per questo motivo nella nostra architettura le particelle vengono memorizzate in una zona di memoria differente da quella della griglia. Nella griglia invece sono memorizzati solo i puntatori alle particelle. La griglia è utilizzata solo come supporto all’algoritmo, non è quindi necessaria per l’esistenza delle particelle.
+Il nostro obiettivo era quello di eliminare quanti più controlli inutili possibile; quindi ci siamo impegnati ad utilizzare approcci che prevedono: memoization, caching e sfruttamento della località delle particelle.
+
+\section{Architettura}
+Il nostro algoritmo utilizza una matrice in cui in ogni cella è contenuta una linked-list. Questo ci permette di evitare la pre-allocazione di spazio preventiva per ogni cella utilizzando invece gli struct delle particelle come nodi delle linked-list.
+Ogni particella viene inserita nella cella che spazialmente contiene le sue coordinate. La griglia viene riempita e svuotata ad ogni iterazione.
+Questa architettura ci consente di sfruttare la località delle celle ed evitare controlli superflui.
+
+\newpage
+
+\section{Algoritmo}
+Il nostro algoritmo segue i seguenti passaggi:
+\begin{enumerate}
+    \item Popolare le celle della matrice con linked-list vuote.
+    \item Popolare le linked-list con le particelle.
+    \item Ordinare le linked-list.
+    \item Verificare eventuali collisioni.
+    \item Muovere le particelle.
+    \item Ricominciare dal punto 1.
+\end{enumerate}
+
+\subsection{Popolare le celle della matrice con linked-list vuote}
+In questa fase inizializziamo o resettiamo le teste delle linked-list, preparando così la matrice per il passaggio successivo: l'inserimento delle particelle. L'utilizzo delle linked-list è una scelta obbligata. Se avessimo optato per array di dimensione fissa, avremmo dovuto allocare molta memoria e sprecarne altrettanta. Un'alternativa sarebbe stata l'uso di ArrayList in ogni cella, ma questo avrebbe comunque comportato sprechi di memoria e difficoltà nell'implementare una struttura come l'ArrayList in CUDA. 
+
+\subsection{Popolare le linked-list con le particelle}
+Iteriamo sull’array delle particelle e per ognuna di esse inseriamo il puntatore nella cella corrispondente alle sue coordinate. 
+Questo passaggio richiede l'uso di lock o meccanismi di sincronizzazione per consentire l'inserimento nelle liste garantendo la sicurezza dei thread (thread-safety). In questa fase dell'algoritmo, l'implementazione può variare leggermente a seconda del framework utilizzato. Ad esempio, in CUDA abbiamo incontrato difficoltà nell'implementazione di sezioni critiche con i lock, rendendo necessario l'utilizzo del check-and-set. In OpenMP, invece, l'implementazione è stata possibile solamente mediante l'utilizzo di lock mutex. 
+
+\subsection{Ordinare le linked-list}
+Ogni linked-list viene ordinata mediante un algoritmo di ordinamento. Questo passaggio è essenziale per garantire che la complessità del passaggio successivo rimanga lineare. Per comprendere meglio l'importanza di questa operazione, consideriamo il caso in cui non venisse eseguita: il passaggio successivo richiede la verifica delle collisioni tra coppie di celle. Se le particelle all'interno di queste celle non fossero ordinate, saremmo comunque costretti a utilizzare un algoritmo che renda questi controlli più efficienti, probabilmente attraverso processi simili all'ordinamento.
+Ordinare le celle in anticipo ci permette di eseguire questi processi una sola volta per ogni cella, agendo come una sorta di memoizzazione.
+
+ 
+
+
+\subsection{Verificare eventuali collisioni}
+Iteriamo sulle celle della matrice e, per ciascuna di esse, controlliamo le collisioni con le particelle presenti nelle celle adiacenti. L'algoritmo sviluppato per la verifica delle collisioni prende in input due celle alla volta, quindi iteriamo sulla matrice e per ogni cella eseguiamo l’algoritmo n volte (sulle celle circostanti), dove n dipende dal tipo di cella*. Grazie al fatto che le linked-list presenti nelle celle sono ordinate, l’algoritmo può operare con complessità lineare, sfruttando la pseudo-memoizzazione del passaggio precedente.
+
+\begin{quote}
+ * Per evitare controlli ridondanti, abbiamo sviluppato dei pattern che, a seconda del tipo di cella, determinano quali celle adiacenti devono essere controllate, evitando di verificare tutte e nove le celle circostanti.
+\end{quote}
+ 
+
+\subsection{Muovere le particelle}
+Iteriamo sull’array delle particelle e in ogni struct cambiamo le coordinate di 1 pixel. La direzione è data da un random number generator.
+
+\newpage
+\subfile{chapters/Conclusions}
+\clearpage
+\bibliographystyle{unsrt}
+\bibliography{ref}
+\nocite{*}  % to include references which were not cited
+%\addcontentsline{toc}{chapter}{references}
+
+\end{document}
