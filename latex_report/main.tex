@@ -65,18 +65,20 @@ Una particella diventa parte di un cristallo (e si ferma) quando si trova in pro
 Per la nostra simulazione abbiamo deciso di utilizzare i framework OpenMP e CUDA.
 
 \section{Il nostro approccio}
-La nostra intenzione era quella di dare alle particelle la possibilità di muoversi in qualunque punto dello spazio indipendentemente dalla griglia. Per questo motivo nella nostra architettura le particelle vengono memorizzate in una zona di memoria differente da quella della griglia. Nella griglia invece sono memorizzati solo i puntatori alle particelle. La griglia è utilizzata solo come supporto all’algoritmo, non è quindi necessaria per l’esistenza delle particelle.
-Il nostro obiettivo era quello di eliminare quanti più controlli inutili possibile; quindi ci siamo impegnati ad utilizzare approcci che prevedono: memoization, caching e sfruttamento della località delle particelle.
+L'obiettivo che ci siamo preposti consiste nel permettere alle particelle di muoversi liberamente in qualsiasi punto dello spazio, indipendentemente dalla griglia menzionata nella consegna. Per questo motivo, nella nostra architettura, le particelle occupano una zona di memoria separata da quella della griglia. In quest'ultima, infatti, sono memorizzati solo i puntatori alle particelle. \\ Ci teniamo a sottolineare che la griglia è utilizzata esclusivamente come supporto per l'algoritmo e non è necessaria per l'esistenza delle particelle stesse.
+Per limitare notevolmente il numero di controlli necessari, abbiamo adottato approcci che includono memoization, caching e sfruttamento della località delle particelle.
+
+ 
 
 \section{Architettura}
-Il nostro algoritmo utilizza una matrice in cui in ogni cella è contenuta una linked-list. Questo ci permette di evitare la pre-allocazione di spazio preventiva per ogni cella utilizzando invece gli struct delle particelle come nodi delle linked-list.
-Ogni particella viene inserita nella cella che spazialmente contiene le sue coordinate. La griglia viene riempita e svuotata ad ogni iterazione.
-Questa architettura ci consente di sfruttare la località delle celle ed evitare controlli superflui.
+Il nostro algoritmo è implementato tramite una matrice, le cui celle contengono una linked-list ciascuna.
+Così facendo evitiamo la pre-allocazione preventiva di spazio per ogni cella, impiegando invece gli struct delle particelle come nodi delle linked-list. Ad ogni particella nello spazio corrisponde una cella della griglia, a seconda delle coordinate. La griglia viene popolata e svuotata a ogni iterazione.
+Questa architettura ci consente di sfruttare la località delle particelle ed evitare controlli superflui.
 
 \newpage
 
 \section{Algoritmo}
-Il nostro algoritmo segue i seguenti passaggi:
+Il nostro algoritmo prevede i seguenti passaggi:
 \begin{enumerate}
     \item Popolare le celle della matrice con linked-list vuote.
     \item Popolare le linked-list con le particelle.
@@ -90,11 +92,11 @@ Il nostro algoritmo segue i seguenti passaggi:
 In questa fase inizializziamo o resettiamo le teste delle linked-list, preparando così la matrice per il passaggio successivo: l'inserimento delle particelle. L'utilizzo delle linked-list è una scelta obbligata. Se avessimo optato per array di dimensione fissa, avremmo dovuto allocare molta memoria e sprecarne altrettanta. Un'alternativa sarebbe stata l'uso di ArrayList in ogni cella, ma questo avrebbe comunque comportato sprechi di memoria e difficoltà nell'implementare una struttura come l'ArrayList in CUDA. 
 
 \subsection{Popolare le linked-list con le particelle}
-Iteriamo sull’array delle particelle e per ognuna di esse inseriamo il puntatore nella cella corrispondente alle sue coordinate. 
-Questo passaggio richiede l'uso di lock o meccanismi di sincronizzazione per consentire l'inserimento nelle liste garantendo la sicurezza dei thread (thread-safety). In questa fase dell'algoritmo, l'implementazione può variare leggermente a seconda del framework utilizzato. Ad esempio, in CUDA abbiamo incontrato difficoltà nell'implementazione di sezioni critiche con i lock, rendendo necessario l'utilizzo del check-and-set. In OpenMP, invece, l'implementazione è stata possibile solamente mediante l'utilizzo di lock mutex. 
+Iteriamo sull’array delle particelle e per ognuna di esse inseriamo il puntatore nella cella corrispondente alle sue coordinate.
+Questo passaggio richiede l'uso di lock o meccanismi di sincronizzazione per consentire l'inserimento nelle liste, garantendo così la thread-safety. In questa fase dell'algoritmo, l'implementazione può variare leggermente a seconda del framework utilizzato. \\ Ad esempio, in CUDA abbiamo incontrato difficoltà nell'implementazione di sezioni critiche con i lock, rendendo necessario l'utilizzo del check-and-set. In OpenMP, invece, l'implementazione è stata possibile solamente mediante l'utilizzo di lock mutex. 
 
 \subsection{Ordinare le linked-list}
-Ogni linked-list viene ordinata mediante un algoritmo di ordinamento. Questo passaggio è essenziale per garantire che la complessità del passaggio successivo rimanga lineare. Per comprendere meglio l'importanza di questa operazione, consideriamo il caso in cui non venisse eseguita: il passaggio successivo richiede la verifica delle collisioni tra coppie di celle. Se le particelle all'interno di queste celle non fossero ordinate, saremmo comunque costretti a utilizzare un algoritmo che renda questi controlli più efficienti, probabilmente attraverso processi simili all'ordinamento.
+Ogni linked-list viene ordinata mediante un algoritmo di ordinamento. Questo passaggio è essenziale per rendere lineare la complessità del passaggio successivo. \\ Per comprendere meglio l'importanza di questa operazione, consideriamo il caso in cui non venisse eseguita: il passaggio successivo richiede la verifica delle collisioni tra coppie di celle. Se le particelle all'interno di queste celle non fossero ordinate, saremmo comunque costretti a utilizzare un algoritmo che renda questi controlli più efficienti, probabilmente attraverso processi simili all'ordinamento.
 Ordinare le celle in anticipo ci permette di eseguire questi processi una sola volta per ogni cella, agendo come una sorta di memoizzazione.
 
  
@@ -109,14 +111,10 @@ Iteriamo sulle celle della matrice e, per ciascuna di esse, controlliamo le coll
  
 
 \subsection{Muovere le particelle}
-Iteriamo sull’array delle particelle e in ogni struct cambiamo le coordinate di 1 pixel. La direzione è data da un random number generator.
+Iteriamo sull’array delle particelle ed in ogni struct cambiamo le coordinate di 1 pixel. La direzione è data da un random number generator.
 
 \newpage
-\subfile{chapters/Conclusions}
 \clearpage
 \bibliographystyle{unsrt}
-\bibliography{ref}
-\nocite{*}  % to include references which were not cited
-%\addcontentsline{toc}{chapter}{references}
 
 \end{document}
