@@ -392,7 +392,7 @@ int main() {
         check_for_collisions<<<blocksPerGrid, threadsPerBlock>>>(d_grid);
         cudaDeviceSynchronize();
 
-        // move_particles_kernel<<<numBlocks_, threadsPerBlock_>>>(particles, states);
+        move_particles_kernel<<<numBlocks_, threadsPerBlock_>>>(particles, states);
         reset_linked_lists<<<blocksPerGrid, threadsPerBlock>>>(d_grid);
         cudaDeviceSynchronize();
 
