@@ -166,8 +166,8 @@ __device__ void check_collisions(ListHead* cell1, ListHead* cell2) {
         while (pk != nullptr && pk->x <= p1->x + threshold) {
             if (p1->walker != pk->walker && abs(p1->y - pk->y) <= threshold) {
                 // printf("Collision between particles %d and %d\n", p1->id, pk->id);
-                p1->walker = 0;
-                pk->walker = 0;
+                // p1->walker = 0;
+                // pk->walker = 0;
             }
             pk = pk->next_particle;
         }
@@ -293,31 +293,6 @@ __global__ void move_particles_kernel(ListHead*** grid) {
                 prev = p;
             }
             p = next_p;
-            i++;
-            if (i > 1000) {
-                // print_linked_lists(grid);
-                printf("Cycle detected in cell (%d, %d)\n", row, col);
-                // check if cell or its components are null or nullpointer
-                if (cell == nullptr) printf("Cell is null\n");
-
-                if (cell->head == nullptr) {
-                    printf("Cell head is null\n");
-                } else {
-                    printf("Cell: %d, %d\n", cell->head->id, cell->head->walker);
-                }
-
-                if (p == nullptr) {
-                    printf("P is null\n");
-                } else {
-                    printf("P: %d, %d\n", p->id, p->walker);
-                }
-                if (prev == nullptr) {
-                    printf("Prev is null\n");
-                } else {
-                    printf("Prev: %d, %d\n", prev->id, prev->walker);
-                }
-                assert(0);
-            }
         }
     }
 }
@@ -434,17 +409,12 @@ int main() {
     while (1) {
         sort_single_cell_insertionSort<<<blocksPerGrid, threadsPerBlock>>>(d_grid);
         cudaDeviceSynchronize();
-        CHECK_LAST_ERROR();
 
         check_for_collisions<<<blocksPerGrid, threadsPerBlock>>>(d_grid);
         cudaDeviceSynchronize();
-        CHECK_LAST_ERROR();
-        
-        // print_linked_lists<<<1, 1>>>(d_grid);
 
         move_particles_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_grid);
         cudaDeviceSynchronize();
-        CHECK_LAST_ERROR();
 
         auto end = std::chrono::high_resolution_clock::now();
         iteration++;
