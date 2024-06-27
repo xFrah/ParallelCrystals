@@ -18,9 +18,9 @@ extern "C" {
 
 struct ListHead {
     Particle* head;
+    curandState state;
 };
 
-curandState* states;
 __device__ Configuration d_config;
 __device__ uint64_t gridHeight;
 __device__ uint64_t gridWidth;
@@ -51,16 +51,6 @@ Particle* particles;
         }                                                                     \
     }
 
-__global__ void reset_linked_lists(ListHead*** grid) {
-    uint64_t row = blockIdx.y * blockDim.y + threadIdx.y;
-    uint64_t col = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (row < gridHeight && col < gridWidth) {
-        ListHead* cell = grid[row][col];
-        cell->head = NULL;
-    }
-}
-
 __device__ void appendNode(ListHead* listHead, Particle* newHead) {
     Particle* oldHead;
     do {
@@ -69,12 +59,21 @@ __device__ void appendNode(ListHead* listHead, Particle* newHead) {
     } while (atomicCAS((unsigned long long int*)&(listHead->head), (unsigned long long int)oldHead, (unsigned long long int)newHead) != (unsigned long long int)oldHead);
 }
 
+__device__ void removeNode(ListHead* listHead, Particle* prev, Particle* current) {
+    if (prev == nullptr) {
+        listHead->head = current->next_particle;
+    } else {
+        prev->next_particle = current->next_particle;
+    }
+    current->next_particle = nullptr;
+}
+
 __global__ void makeLinkedLists(ListHead*** grid, Particle* particles) {
     uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     uint64_t num_threads = blockDim.x * gridDim.x;
     uint64_t start = (idx * d_config.NUM_PARTICLES) / num_threads;
     uint64_t end = ((idx + 1) * d_config.NUM_PARTICLES) / num_threads;
-    uint64_t gridX, gridY;
+    int64_t gridX, gridY;
     Particle* p;
 
     for (uint64_t i = start; i < end; i++) {
@@ -82,25 +81,17 @@ __global__ void makeLinkedLists(ListHead*** grid, Particle* particles) {
         gridX = p->x / cellSize;
         gridY = p->y / cellSize;
 
-        if (gridX >= gridWidth) {
-            gridX = gridWidth - 1;
-        }
-        if (gridY >= gridHeight) {
-            gridY = gridHeight - 1;
-        }
-        if (gridX < 0) {
-            gridX = 0;
-        }
-        if (gridY < 0) {
-            gridY = 0;
-        }
+        if (gridX >= gridWidth) gridX = gridWidth - 1;
+        if (gridY >= gridHeight) gridY = gridHeight - 1;
+        if (gridX < 0) gridX = 0;
+        if (gridY < 0) gridY = 0;
         appendNode(grid[gridY][gridX], p);
         
     }
 }
 __global__ void sort_single_cell_insertionSort(ListHead*** grid) {
-    uint64_t row = blockIdx.y * blockDim.y + threadIdx.y;
-    uint64_t col = blockIdx.x * blockDim.x + threadIdx.x;
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
 
     const int MAX_DEPTH = d_config.NUM_PARTICLES + (d_config.NUM_PARTICLES * 0.2);
 
@@ -108,15 +99,15 @@ __global__ void sort_single_cell_insertionSort(ListHead*** grid) {
         ListHead* cell = grid[row][col];
         Particle* head = cell->head;
 
-        if (head == NULL || head->next_particle == NULL) {
+        if (head == nullptr || head->next_particle == nullptr) {
             return;
         }
 
-        Particle* sorted = NULL;
+        Particle* sorted = nullptr;
         Particle* current = head;
         int depth = 0;
 
-        while (current != NULL) {
+        while (current != nullptr) {
             if (depth++ > MAX_DEPTH) {
                 printf("2) Cycle detected or excessive depth in cell (%d, %d) with %d > %d\n", row, col, depth, MAX_DEPTH);
                 // assert(0);
@@ -124,13 +115,13 @@ __global__ void sort_single_cell_insertionSort(ListHead*** grid) {
             }
 
             Particle* next = current->next_particle;
-            if (sorted == NULL || current->x < sorted->x) {
+            if (sorted == nullptr || current->x < sorted->x) {
                 current->next_particle = sorted;
                 sorted = current;
             } else {
                 Particle* search = sorted;
                 depth = 0;
-                while (search->next_particle != NULL && search->next_particle->x < current->x) {
+                while (search->next_particle != nullptr && search->next_particle->x < current->x) {
                     search = search->next_particle;
                     if (depth++ > MAX_DEPTH) {
                         printf("Cycle detected or excessive depth in cell (%d, %d) with %d > %d\n", row, col, depth, MAX_DEPTH);
@@ -147,7 +138,7 @@ __global__ void sort_single_cell_insertionSort(ListHead*** grid) {
 
         Particle* tail = sorted;
         depth = 0;
-        while (tail != NULL && tail->next_particle != NULL) {
+        while (tail != nullptr && tail->next_particle != nullptr) {
             tail = tail->next_particle;
             if (depth++ > MAX_DEPTH) {
                 printf("Cycle detected or excessive depth while updating tail in cell (%d, %d)\n", row, col);
@@ -155,8 +146,8 @@ __global__ void sort_single_cell_insertionSort(ListHead*** grid) {
                 break;
             }
         }
-        if (tail != NULL) {
-            tail->next_particle = NULL;
+        if (tail != nullptr) {
+            tail->next_particle = nullptr;
         }
     }
 }
@@ -166,17 +157,17 @@ __device__ void check_collisions(ListHead* cell1, ListHead* cell2) {
     Particle* pj = cell2->head;
     int threshold = d_config.PARTICLE_RADIUS;
 
-    while (p1 != NULL && pj != NULL) {
-        while (pj != NULL && pj->x < p1->x - threshold) {
+    while (p1 != nullptr && pj != nullptr) {
+        while (pj != nullptr && pj->x < p1->x - threshold) {
             pj = pj->next_particle;
         }
 
         Particle* pk = pj;
-        while (pk != NULL && pk->x <= p1->x + threshold) {
+        while (pk != nullptr && pk->x <= p1->x + threshold) {
             if (p1->walker != pk->walker && abs(p1->y - pk->y) <= threshold) {
                 // printf("Collision between particles %d and %d\n", p1->id, pk->id);
-                // p1->walker = 0;
-                // pk->walker = 0;
+                p1->walker = 0;
+                pk->walker = 0;
             }
             pk = pk->next_particle;
         }
@@ -185,8 +176,8 @@ __device__ void check_collisions(ListHead* cell1, ListHead* cell2) {
 }
 
 __global__ void check_for_collisions(ListHead*** grid) {
-    uint64_t row = blockIdx.y * blockDim.y + threadIdx.y;
-    uint64_t col = blockIdx.x * blockDim.x + threadIdx.x;
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (row < gridHeight && col < gridWidth) {
         ListHead* cell = grid[row][col];
@@ -242,19 +233,19 @@ __global__ void check_for_collisions(ListHead*** grid) {
     }
 }
 
-__global__ void print_linked_lists(ListHead*** grid) {
-    uint64_t counter = 0;
+__device__ void print_linked_lists(ListHead*** grid) {
+    int counter = 0;
 
-    for (uint64_t i = 0; i < gridHeight; i++) {
-        for (uint64_t j = 0; j < gridWidth; j++) {
+    for (int i = 0; i < gridHeight; i++) {
+        for (int j = 0; j < gridWidth; j++) {
             ListHead* cell = grid[i][j];
-            if (cell->head == NULL) {
+            if (cell->head == nullptr) {
                 // printf("Cell (%d, %d) is empty\n", i, j);
                 continue;
             }
             Particle* p = cell->head;
             printf("[%d] Cell (%d, %d): ", counter, i, j);
-            while (p != NULL) {
+            while (p != nullptr) {
                 printf("%d (%d, %d) ", p->id, p->x, p->y);
                 counter++;
                 p = p->next_particle;
@@ -264,30 +255,82 @@ __global__ void print_linked_lists(ListHead*** grid) {
     }
 }
 
-__global__ void move_particles_kernel(Particle* particles, curandState* states) {
-    uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    uint64_t num_threads = blockDim.x * gridDim.x;
-    uint64_t start = (idx * d_config.NUM_PARTICLES) / num_threads;
-    uint64_t end = ((idx + 1) * d_config.NUM_PARTICLES) / num_threads;
-    for (uint64_t i = start; i < end; i++) {  // move particles
-        if (particles[i].walker) {
-            particles[i].x = particles[i].x + 1 + (-2 * (curand(&states[idx]) % 2));
-            particles[i].y = particles[i].y + 1 + (-2 * (curand(&states[idx]) % 2));
+__global__ void move_particles_kernel(ListHead*** grid) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int idx = row * gridWidth + col;
+    int newGridX, newGridY;
+    int i = 0;
+    
+    if (row < gridHeight && col < gridWidth) {
+        ListHead* cell = grid[row][col];
+        Particle* p = cell->head;
+        Particle* prev = nullptr;
+        Particle* next_p;
+        bool removed;
+        while (p != nullptr) {
+            removed = false;
+            next_p = p->next_particle;
+            if (p->walker) {
+                p->x = p->x + 1 + (-2 * (curand(&cell->state) % 2));
+                p->y = p->y + 1 + (-2 * (curand(&cell->state) % 2));
+
+                newGridX = p->x / cellSize;
+                newGridY = p->y / cellSize;
+
+                if (newGridX >= gridWidth) newGridX = gridWidth - 1;
+                if (newGridY >= gridHeight) newGridY = gridHeight - 1;
+                if (newGridX < 0) newGridX = 0;
+                if (newGridY < 0)newGridY = 0;
+
+                if (newGridX != col || newGridY != row) {
+                    removeNode(cell, prev, p);
+                    appendNode(grid[newGridY][newGridX], p);
+                    removed = true;
+                }
+            }
+            if (removed == false) {
+                prev = p;
+            }
+            p = next_p;
+            i++;
+            if (i > 1000) {
+                // print_linked_lists(grid);
+                printf("Cycle detected in cell (%d, %d)\n", row, col);
+                // check if cell or its components are null or nullpointer
+                if (cell == nullptr) printf("Cell is null\n");
+
+                if (cell->head == nullptr) {
+                    printf("Cell head is null\n");
+                } else {
+                    printf("Cell: %d, %d\n", cell->head->id, cell->head->walker);
+                }
+
+                if (p == nullptr) {
+                    printf("P is null\n");
+                } else {
+                    printf("P: %d, %d\n", p->id, p->walker);
+                }
+                if (prev == nullptr) {
+                    printf("Prev is null\n");
+                } else {
+                    printf("Prev: %d, %d\n", prev->id, prev->walker);
+                }
+                assert(0);
+            }
         }
-        particles[i].next_particle = NULL;
     }
 }
 
-__global__ void init_particles_kernel(Particle* particles, curandState* states) {
-    for (uint64_t i = 0; i < numBlocks_ * threadsPerBlock_; i++) {
-        curand_init(d_config.SEED, i, 0, &states[i]);
-    }
+__global__ void init_particles_kernel(Particle* particles) {
+    curandState state;
+    curand_init(d_config.SEED, 0, 0, &state);
     for (uint64_t i = 0; i < d_config.NUM_PARTICLES; i++) {
         particles[i].id = i;
-        particles[i].x = curand(&states[0]) % d_config.WIDTH;
-        particles[i].y = curand(&states[0]) % d_config.HEIGHT;
-        particles[i].walker = curand(&states[0]) % 2;
-        particles[i].next_particle = NULL;
+        particles[i].x = curand(&state) % d_config.WIDTH;
+        particles[i].y = curand(&state) % d_config.HEIGHT;
+        particles[i].walker = curand(&state) % 2;
+        particles[i].next_particle = nullptr;
     }
 }
 
@@ -300,6 +343,8 @@ __global__ void initializeGrid(ListHead*** grid) {
 
     if (row == 0 && col == 0) printf("Total size: %d\n", total_size);
 
+    int idx = row * gridWidth + col;
+
     if (row < gridHeight && col < gridWidth) {
         grid[row][col] = (ListHead*)malloc(sizeof(ListHead));
         if (grid[row][col] == NULL) {
@@ -307,7 +352,8 @@ __global__ void initializeGrid(ListHead*** grid) {
             assert(0);
             return;
         }
-        grid[row][col]->head = NULL;
+        grid[row][col]->head = nullptr;
+        curand_init(d_config.SEED, idx, 0, &grid[row][col]->state);
     }
 }
 
@@ -318,7 +364,6 @@ ListHead*** allocate_memory() {
     CHECK_CUDA_ERROR(cudaMemcpyToSymbol(gridWidth, &gridWidth_host, sizeof(uint64_t)));
     CHECK_CUDA_ERROR(cudaMemcpyToSymbol(cellSize, &cellSize_host, sizeof(uint64_t)));
     CHECK_CUDA_ERROR(cudaMalloc(&particles, config.NUM_PARTICLES * sizeof(Particle)));
-    CHECK_CUDA_ERROR(cudaMalloc(&states, numBlocks_ * threadsPerBlock_ * sizeof(curandState)));
 
     std::cout << "Grid size: " << gridHeight_host << "x" << gridWidth_host << std::endl;
 
@@ -373,7 +418,11 @@ int main() {
     initializeGrid<<<blocksPerGrid, threadsPerBlock>>>(d_grid);
     cudaDeviceSynchronize();
     CHECK_LAST_ERROR();
-    init_particles_kernel<<<1, 1>>>(particles, states);
+    init_particles_kernel<<<1, 1>>>(particles);
+    cudaDeviceSynchronize();
+    CHECK_LAST_ERROR();
+
+    makeLinkedLists<<<numBlocks_, threadsPerBlock_>>>(d_grid, particles);
     cudaDeviceSynchronize();
     CHECK_LAST_ERROR();
 
@@ -383,18 +432,19 @@ int main() {
     int iteration = 0;
 
     while (1) {
-        makeLinkedLists<<<numBlocks_, threadsPerBlock_>>>(d_grid, particles);
-        cudaDeviceSynchronize();
-
         sort_single_cell_insertionSort<<<blocksPerGrid, threadsPerBlock>>>(d_grid);
         cudaDeviceSynchronize();
+        CHECK_LAST_ERROR();
 
         check_for_collisions<<<blocksPerGrid, threadsPerBlock>>>(d_grid);
         cudaDeviceSynchronize();
+        CHECK_LAST_ERROR();
+        
+        // print_linked_lists<<<1, 1>>>(d_grid);
 
-        // move_particles_kernel<<<numBlocks_, threadsPerBlock_>>>(particles, states);
-        reset_linked_lists<<<blocksPerGrid, threadsPerBlock>>>(d_grid);
+        move_particles_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_grid);
         cudaDeviceSynchronize();
+        CHECK_LAST_ERROR();
 
         auto end = std::chrono::high_resolution_clock::now();
         iteration++;
