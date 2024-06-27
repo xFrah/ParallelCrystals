@@ -73,8 +73,8 @@ __global__ void makeLinkedLists(ListHead*** grid, Particle* particles) {
     uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     uint64_t num_threads = blockDim.x * gridDim.x;
     uint64_t start = (idx * d_config.NUM_PARTICLES) / num_threads;
-    uint64_t end = ((idx + 1) * d_config.NUM_PARTICLES) / num_threads;
-    uint64_t gridX, gridY;
+    int64_t end = ((idx + 1) * d_config.NUM_PARTICLES) / num_threads;
+    int64_t gridX, gridY;
     Particle* p;
 
     for (uint64_t i = start; i < end; i++) {
@@ -271,8 +271,8 @@ __global__ void move_particles_kernel(Particle* particles, curandState* states) 
     uint64_t end = ((idx + 1) * d_config.NUM_PARTICLES) / num_threads;
     for (uint64_t i = start; i < end; i++) {  // move particles
         if (particles[i].walker) {
-            particles[i].x = particles[i].x + 1 + (-2 * (curand(&states[idx]) % 2));
-            particles[i].y = particles[i].y + 1 + (-2 * (curand(&states[idx]) % 2));
+            // particles[i].x = particles[i].x + 1 + (-2 * (curand(&states[idx]) % 2));
+            // particles[i].y = particles[i].y + 1 + (-2 * (curand(&states[idx]) % 2));
         }
         particles[i].next_particle = NULL;
     }
