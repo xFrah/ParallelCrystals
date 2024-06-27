@@ -1,7 +1,7 @@
 {
     "screen_height": 1000,
     "screen_width": 1000,
-    "num_particles": 100000,
+    "num_particles": 10000000,
     "num_threads": 4,
     "use_max_hardware_threads": true,
     "particle_radius": 5,
