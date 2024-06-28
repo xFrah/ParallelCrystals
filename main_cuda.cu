@@ -18,10 +18,13 @@ extern "C" {
 
 struct ListHead {
     Particle* head;
+    uint64_t particle_array_start_idx;
+    uint64_t length;
 };
 
 curandState* states;
 __device__ Configuration d_config;
+__device__ uint64_t d_sorted = 1;
 __device__ uint64_t gridHeight;
 __device__ uint64_t gridWidth;
 __device__ uint64_t cellSize;
@@ -51,116 +54,6 @@ Particle* particles;
         }                                                                     \
     }
 
-__global__ void reset_linked_lists(ListHead*** grid) {
-    uint64_t row = blockIdx.y * blockDim.y + threadIdx.y;
-    uint64_t col = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (row < gridHeight && col < gridWidth) {
-        ListHead* cell = grid[row][col];
-        cell->head = NULL;
-    }
-}
-
-__device__ void appendNode(ListHead* listHead, Particle* newHead) {
-    Particle* oldHead;
-    do {
-        oldHead = listHead->head;          // Read the current head
-        newHead->next_particle = oldHead;  // Set the new node's next to the current head
-    } while (atomicCAS((unsigned long long int*)&(listHead->head), (unsigned long long int)oldHead, (unsigned long long int)newHead) != (unsigned long long int)oldHead);
-}
-
-__global__ void makeLinkedLists(ListHead*** grid, Particle* particles) {
-    uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-    uint64_t num_threads = blockDim.x * gridDim.x;
-    uint64_t start = (idx * d_config.NUM_PARTICLES) / num_threads;
-    int64_t end = ((idx + 1) * d_config.NUM_PARTICLES) / num_threads;
-    int64_t gridX, gridY;
-    Particle* p;
-
-    for (uint64_t i = start; i < end; i++) {
-        p = &particles[i];
-        gridX = p->x / cellSize;
-        gridY = p->y / cellSize;
-
-        if (gridX >= gridWidth) {
-            gridX = gridWidth - 1;
-        }
-        if (gridY >= gridHeight) {
-            gridY = gridHeight - 1;
-        }
-        if (gridX < 0) {
-            gridX = 0;
-        }
-        if (gridY < 0) {
-            gridY = 0;
-        }
-        appendNode(grid[gridY][gridX], p);
-        
-    }
-}
-__global__ void sort_single_cell_insertionSort(ListHead*** grid) {
-    uint64_t row = blockIdx.y * blockDim.y + threadIdx.y;
-    uint64_t col = blockIdx.x * blockDim.x + threadIdx.x;
-
-    const int MAX_DEPTH = d_config.NUM_PARTICLES + (d_config.NUM_PARTICLES * 0.2);
-
-    if (row < gridHeight && col < gridWidth) {
-        ListHead* cell = grid[row][col];
-        Particle* head = cell->head;
-
-        if (head == NULL || head->next_particle == NULL) {
-            return;
-        }
-
-        Particle* sorted = NULL;
-        Particle* current = head;
-        int depth = 0;
-
-        while (current != NULL) {
-            if (depth++ > MAX_DEPTH) {
-                printf("2) Cycle detected or excessive depth in cell (%d, %d) with %d > %d\n", row, col, depth, MAX_DEPTH);
-                // assert(0);
-                break;
-            }
-
-            Particle* next = current->next_particle;
-            if (sorted == NULL || current->x < sorted->x) {
-                current->next_particle = sorted;
-                sorted = current;
-            } else {
-                Particle* search = sorted;
-                depth = 0;
-                while (search->next_particle != NULL && search->next_particle->x < current->x) {
-                    search = search->next_particle;
-                    if (depth++ > MAX_DEPTH) {
-                        printf("Cycle detected or excessive depth in cell (%d, %d) with %d > %d\n", row, col, depth, MAX_DEPTH);
-                        break;
-                    }
-                }
-                current->next_particle = search->next_particle;
-                search->next_particle = current;
-            }
-            current = next;
-        }
-
-        cell->head = sorted;
-
-        Particle* tail = sorted;
-        depth = 0;
-        while (tail != NULL && tail->next_particle != NULL) {
-            tail = tail->next_particle;
-            if (depth++ > MAX_DEPTH) {
-                printf("Cycle detected or excessive depth while updating tail in cell (%d, %d)\n", row, col);
-                // assert(0);
-                break;
-            }
-        }
-        if (tail != NULL) {
-            tail->next_particle = NULL;
-        }
-    }
-}
-
 __device__ void check_collisions(ListHead* cell1, ListHead* cell2) {
     Particle* p1 = cell1->head;
     Particle* pj = cell2->head;
@@ -183,6 +76,139 @@ __device__ void check_collisions(ListHead* cell1, ListHead* cell2) {
         p1 = p1->next_particle;
     }
 }
+
+__global__ void makeLinkedLists(ListHead*** grid, Particle* particles) {
+    uint64_t row = blockIdx.y * blockDim.y + threadIdx.y;
+    uint64_t col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (row < gridHeight && col < gridWidth) {
+        ListHead* cell = grid[row][col];
+        uint64_t start_idx = cell->particle_array_start_idx;
+        Particle* head = &particles[start_idx];
+        cell->head = head;
+        for (uint64_t i = start_idx; i < start_idx + cell->length - 1; i++) {
+            particles[i].next_particle = &particles[i + 1];
+        }
+        particles[start_idx + cell->length - 1].next_particle = NULL;
+    }
+}
+
+__global__ void findCellStartIndicesKernel(ListHead*** grid, Particle *d_array) {
+    uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    uint64_t num_threads = blockDim.x * gridDim.x;
+    uint64_t start = (idx * d_config.NUM_PARTICLES) / num_threads;
+    uint64_t end = ((idx + 1) * d_config.NUM_PARTICLES) / num_threads;
+
+    for (uint64_t i = start; i < end; i++) {  // move particles
+        int gridX = d_array[i].x / cellSize;
+        int gridY = d_array[i].y / cellSize;
+
+        if (gridX >= gridWidth) gridX = gridWidth - 1;
+        if (gridY >= gridHeight) gridY = gridHeight - 1;
+        if (gridX < 0) gridX = 0;
+        if (gridY < 0) gridY = 0;
+
+        int cellIndex = gridHeight * gridY + gridX;
+
+        // Print the index where each cell starts
+        if (i == 0 || (gridX != (d_array[i - 1].x / cellSize) && gridY != (d_array[i - 1].y / cellSize))) {
+            printf("Cell %llu starts at index %d\n", cellIndex, i);
+            grid[gridY][gridX]->particle_array_start_idx = i;
+            if (i > 0) {
+                int prevGridX = d_array[i - 1].x / cellSize;
+                int prevGridY = d_array[i - 1].y / cellSize;
+                int prevCellIndex = gridHeight * prevGridY + prevGridX;
+                printf("Cell %d ends at index %d\n", prevCellIndex, i - 1);
+                grid[prevGridY][prevGridX]->length = i - grid[prevGridY][prevGridX]->particle_array_start_idx;
+            }
+        }
+        // TODO do the length of last cell
+    }
+}
+
+
+__device__ bool compareParticles(Particle *a, Particle *b) {
+    // Calculate grid positions for particle a
+    int gridX_a = a->x / cellSize;
+    int gridY_a = a->y / cellSize;
+    
+    if (gridX_a >= gridWidth) gridX_a = gridWidth - 1;
+    if (gridY_a >= gridHeight) gridY_a = gridHeight - 1;
+    if (gridX_a < 0) gridX_a = 0;
+    if (gridY_a < 0) gridY_a = 0;
+    
+    // Calculate grid positions for particle b
+    int gridX_b = b->x / cellSize;
+    int gridY_b = b->y / cellSize;
+    
+    if (gridX_b >= gridWidth) gridX_b = gridWidth - 1;
+    if (gridY_b >= gridHeight) gridY_b = gridHeight - 1;
+    if (gridX_b < 0) gridX_b = 0;
+    if (gridY_b < 0) gridY_b = 0;
+    
+    // Calculate grid indices for comparison
+    int index_a = gridWidth * gridY_a + gridX_a;
+    int index_b = gridWidth * gridY_b + gridX_b;
+    
+    // Compare by grid index, then by x in case of parity
+    if (index_a == index_b) {
+        return a->x > b->x;
+    }
+    return index_a > index_b;
+}
+
+
+__global__ void oddEvenSortKernel(Particle *d_array) {
+    int n = d_config.NUM_PARTICLES;
+    uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    uint64_t num_threads = blockDim.x * gridDim.x;
+    uint64_t start = (idx * d_config.NUM_PARTICLES) / num_threads;
+    uint64_t end = ((idx + 1) * d_config.NUM_PARTICLES) / num_threads;
+
+    for (int phase = 0; phase < (n + 1) / 2; ++phase) {
+        bool local_sorted = true;
+
+        // Odd phase
+        for (uint64_t i = start; i < end; i++) {  // move particles
+            if ((i % 2 == 1) && (i < n - 1)) {
+                if (compareParticles(&d_array[i], &d_array[i + 1])) {
+                    Particle temp = d_array[i];
+                    d_array[i] = d_array[i + 1];
+                    d_array[i + 1] = temp;
+                    local_sorted = false;
+                }
+            }
+        }
+        __syncthreads();
+
+        // Even phase
+        for (uint64_t i = start; i < end; i++) {  // move particles
+            if ((i % 2 == 0) && (i < n - 1)) {
+                if (compareParticles(&d_array[i], &d_array[i + 1])) {
+                    Particle temp = d_array[i];
+                    d_array[i] = d_array[i + 1];
+                    d_array[i + 1] = temp;
+                    local_sorted = false;
+                }
+            }
+        }
+        __syncthreads();
+
+        // If any thread in the block did a swap, mark the array as unsorted
+        if (!local_sorted) {
+            atomicOr(&d_sorted, 0);
+        }
+
+        // Synchronize all threads before next phase
+        __syncthreads();
+
+        // Check if the array is already sorted
+        if (d_sorted == 0) {
+            break;
+        }
+    }
+}
+
 
 __global__ void check_for_collisions(ListHead*** grid) {
     uint64_t row = blockIdx.y * blockDim.y + threadIdx.y;
