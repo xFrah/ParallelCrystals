@@ -239,28 +239,6 @@ __global__ void check_for_collisions(Particles *particles) {
     }
 }
 
-__global__ void print_linked_lists(ListHead ***grid) {
-    uint64_t counter = 0;
-
-    for (uint64_t i = 0; i < gridHeight; i++) {
-        for (uint64_t j = 0; j < gridWidth; j++) {
-            ListHead *cell = grid[i][j];
-            if (cell->head == NULL) {
-                // printf("Cell (%d, %d) is empty\n", i, j);
-                continue;
-            }
-            Particle *p = cell->head;
-            printf("[%d] Cell (%d, %d): ", counter, i, j);
-            while (p != NULL) {
-                printf("%d (%d, %d) ", p->id, p->x, p->y);
-                counter++;
-                p = p->next_particle;
-            }
-            printf("\n");
-        }
-    }
-}
-
 __global__ void move_particles_kernel(Particle *particles, curandState *states) {
     uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     uint64_t num_threads = blockDim.x * gridDim.x;
@@ -288,62 +266,13 @@ __global__ void init_particles_kernel(Particle *particles, curandState *states) 
     }
 }
 
-__global__ void initializeGrid(ListHead ***grid) {
-    uint64_t row = blockIdx.y * blockDim.y + threadIdx.y;
-    uint64_t col = blockIdx.x * blockDim.x + threadIdx.x;
-
-    uint64_t size = gridHeight * gridWidth;
-    uint64_t total_size = size * sizeof(ListHead *);
-
-    if (row == 0 && col == 0)
-        printf("Total size: %d\n", total_size);
-
-    if (row < gridHeight && col < gridWidth) {
-        grid[row][col] = (ListHead *)malloc(sizeof(ListHead));
-        if (grid[row][col] == NULL) {
-            printf("Malloc failed for cell (%d, %d)\n", row, col);
-            assert(0);
-            return;
-        }
-        grid[row][col]->head = NULL;
-    }
-}
-
-ListHead ***allocate_memory() {
+void allocate_memory() {
     CHECK_CUDA_ERROR(cudaMemcpyToSymbol(d_config, &config, sizeof(Configuration)));
     CHECK_CUDA_ERROR(cudaMemcpyToSymbol(gridHeight, &gridHeight_host, sizeof(uint64_t)));
     CHECK_CUDA_ERROR(cudaMemcpyToSymbol(gridWidth, &gridWidth_host, sizeof(uint64_t)));
     CHECK_CUDA_ERROR(cudaMemcpyToSymbol(cellSize, &cellSize_host, sizeof(uint64_t)));
     CHECK_CUDA_ERROR(cudaMalloc(&particles, config.NUM_PARTICLES * sizeof(Particle)));
     CHECK_CUDA_ERROR(cudaMalloc(&states, numBlocks_ * threadsPerBlock_ * sizeof(curandState)));
-
-    std::cout << "Grid size: " << gridHeight_host << "x" << gridWidth_host << std::endl;
-
-    ListHead ***h_grid = (ListHead ***)malloc(gridHeight_host * sizeof(ListHead **));
-    if (h_grid == nullptr) {
-        std::cerr << "Error: Failed to allocate host memory for grid rows" << std::endl;
-        exit(1);
-    }
-    for (uint64_t i = 0; i < gridHeight_host; ++i) {
-        h_grid[i] = (ListHead **)malloc(gridWidth_host * sizeof(ListHead *));
-        if (h_grid[i] == nullptr) {
-            std::cerr << "Error: Failed to allocate host memory for grid columns at row " << i << std::endl;
-            exit(1);
-        }
-    }
-
-    std::cout << "Allocated memory for the grid on the host" << std::endl;
-
-    ListHead ***d_grid;
-    CHECK_CUDA_ERROR(cudaMalloc(&d_grid, gridHeight_host * sizeof(ListHead **)));
-    for (uint64_t i = 0; i < gridHeight_host; ++i) {
-        ListHead **d_row;
-        CHECK_CUDA_ERROR(cudaMalloc(&d_row, gridWidth_host * sizeof(ListHead *)));
-        CHECK_CUDA_ERROR(cudaMemcpy(&d_grid[i], &d_row, sizeof(ListHead *), cudaMemcpyHostToDevice));
-    }
-
-    std::cout << "Allocated memory for the grid on the device" << std::endl;
-    return d_grid;
 }
 
 int main() {
@@ -352,7 +281,7 @@ int main() {
     gridHeight_host = config.HEIGHT / cellSize_host;
     gridWidth_host = config.WIDTH / cellSize_host;
 
-    ListHead ***d_grid = allocate_memory();
+    allocate_memory();
 
     int socket_holder;
     if (config.SHOW_VISUALLY) {
@@ -367,9 +296,6 @@ int main() {
     dim3 threadsPerBlock(16, 16);
     dim3 blocksPerGrid((gridWidth_host + threadsPerBlock.x - 1) / threadsPerBlock.x,
                        (gridHeight_host + threadsPerBlock.y - 1) / threadsPerBlock.y);
-    initializeGrid<<<blocksPerGrid, threadsPerBlock>>>(d_grid);
-    cudaDeviceSynchronize();
-    CHECK_LAST_ERROR();
     init_particles_kernel<<<1, 1>>>(particles, states);
     cudaDeviceSynchronize();
     CHECK_LAST_ERROR();
