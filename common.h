@@ -11,6 +11,7 @@ typedef struct Particle {
     int x;
     int y;
     int walker;
+    int index;
     struct Particle* next_particle;
 } Particle;
 

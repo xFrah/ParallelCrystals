@@ -2,6 +2,8 @@
 #include <cuda_runtime.h>
 #include <curand_kernel.h>
 #include <windows.h>
+#include <thrust/device_ptr.h>
+#include <thrust/sort.h>
 
 #include <chrono>
 #include <iostream>
@@ -18,7 +20,6 @@ extern "C" {
 
 curandState *states;
 __device__ Configuration d_config;
-__device__ uint64_t d_sorted = 1;
 __device__ uint64_t gridHeight;
 __device__ uint64_t gridWidth;
 __device__ uint64_t cellSize;
@@ -75,7 +76,6 @@ __device__ int getCellLength(int index) {
 }
 
 
-
 __device__ void check_collisions(Particle* particles, int gridX1, int gridY1, int gridX2, int gridY2) {
     int threshold = d_config.PARTICLE_RADIUS;
 
@@ -101,85 +101,52 @@ __device__ void check_collisions(Particle* particles, int gridX1, int gridY1, in
             if (p1->walker != pj->walker && abs(p1->y - pj->y) <= threshold) {
                 // Handle collision
                 // printf("Collision between particles %d and %d\n", p1->id, pj->id);
-                // p1->walker = 0;
-                // pj->walker = 0;
+                p1->walker = 0;
+                pj->walker = 0;
             }
         }
     }
 }
 
-__device__ bool compareParticles(Particle *a, Particle *b) {
-    int gridX_a, gridY_a, gridX_b, gridY_b;
-
-    int index_a = cellFromCoords(a->x, a->y, &gridX_a, &gridY_a);
-    int index_b = cellFromCoords(b->x, b->y, &gridX_b, &gridY_b);
-
-    // Compare by grid index, then by x in case of parity
-    if (index_a == index_b) {
-        return a->x > b->x;
+struct ParticleComparator {
+    __device__ bool operator()(const Particle &a, const Particle &b) const {
+        // Compare by grid index, then by x in case of parity
+        if (a.index == b.index) {
+            return a.x < b.x;
+        }
+        return a.index < b.index;
     }
-    return index_a > index_b;
-}
+};
 
-__global__ void oddEvenSortKernel(Particle *d_array) {
-    int n = d_config.NUM_PARTICLES;
+__global__ void checkSortedAndInitializeCellStartIndices(Particle *d_array) {
     uint64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     uint64_t num_threads = blockDim.x * gridDim.x;
     uint64_t start = (idx * d_config.NUM_PARTICLES) / num_threads;
     uint64_t end = ((idx + 1) * d_config.NUM_PARTICLES) / num_threads;
 
-    for (int phase = 0; phase < (n + 1) / 2; ++phase) {
-        bool local_sorted = true;
-
-        // Odd phase
-        for (uint64_t i = start; i < end; i++) { // move particles
-            if ((i % 2 == 1) && (i < n - 1)) {
-                if (compareParticles(&d_array[i], &d_array[i + 1])) {
-                    Particle temp = d_array[i];
-                    d_array[i] = d_array[i + 1];
-                    d_array[i + 1] = temp;
-                    local_sorted = false;
-                }
-            }
+    for (uint64_t i = start; i < end; i++) {
+        int gridX, gridY;
+        int cellIndex = cellFromCoords(d_array[i].x, d_array[i].y, &gridX, &gridY);
+        int prevGridX = -1;
+        int prevGridY = -1;
+        if (i > 0) {
+            int prevCellIndex = cellFromCoords(d_array[i - 1].x, d_array[i - 1].y, &prevGridX, &prevGridY);
         }
-        __syncthreads();
-
-        // Even phase
-        for (uint64_t i = start; i < end; i++) { // move particles
-            if ((i % 2 == 0) && (i < n - 1)) {
-                if (compareParticles(&d_array[i], &d_array[i + 1])) {
-                    Particle temp = d_array[i];
-                    d_array[i] = d_array[i + 1];
-                    d_array[i + 1] = temp;
-                    local_sorted = false;
-                }
-            }
+        if (i == 0 || (gridX != prevGridX || gridY != prevGridY)) {
+            // printf("Thread %llu: Cell index: %d, (%d, %d), Start: %llu\n", idx, cellIndex, gridX, gridY, i);
+            cellStartIndices[cellIndex] = i;
         }
-        __syncthreads();
+        d_array[i].index = cellIndex;
+    }
+}
 
-        // If any thread in the block did a swap, mark the array as unsorted
-        if (!local_sorted) {
-            atomicOr(&d_sorted, 0);
-        }
-
-        // Synchronize all threads before next phase
-        __syncthreads();
-
-        // Check if the array is already sorted
-        if (d_sorted == 0) {
-            for (uint64_t i = start; i < end; i++) {
-                int gridX, gridY;
-                int cellIndex = cellFromCoords(d_array[i].x, d_array[i].y, &gridX, &gridY);
-                int prevGridX = d_array[i - 1].x / cellSize;
-                int prevGridY = d_array[i - 1].y / cellSize;
-
-                if (i == 0 || (gridX != prevGridX && gridY != prevGridY)) {
-                    printf("Cell %d starts at index %llu\n", cellIndex, i);
-                    cellStartIndices[cellIndex] = i;
-                }
-            }
-            break;
-        }
+// kernel to print particle array for debugging
+__global__ void print_particles(Particle *particles) {
+    for (int i = 0; i < 200; i++) {
+        int gridX, gridY;
+        int cellIndex = cellFromCoords(particles[i].x, particles[i].y, &gridX, &gridY);
+        // print cell, x, y and id
+        printf("[%d] Cell: %d, x: %d, y: %d, id: %d (%d, %d)\n", i, cellIndex, particles[i].x, particles[i].y, particles[i].id, gridX, gridY);
     }
 }
 
@@ -313,22 +280,31 @@ int main() {
     auto start = std::chrono::high_resolution_clock::now();
     int iteration = 0;
 
+    thrust::device_ptr<Particle> dev_ptr(particles);
+
     while (1) {
-        oddEvenSortKernel<<<numBlocks_, threadsPerBlock_>>>(particles);
+        thrust::sort(dev_ptr, dev_ptr + config.NUM_PARTICLES, ParticleComparator());
         cudaDeviceSynchronize();
-        CHECK_LAST_ERROR();
+        // CHECK_LAST_ERROR();
+
+        // print_particles<<<1, 1>>>(particles);
 
         // std::cout << "Sorting done\n";
 
-        check_for_collisions<<<blocksPerGrid, threadsPerBlock>>>(particles);
+        // Check sorted array and initialize cell start indices
+        checkSortedAndInitializeCellStartIndices<<<numBlocks_, threadsPerBlock_>>>(particles);
         cudaDeviceSynchronize();
-        CHECK_LAST_ERROR();
+        // CHECK_LAST_ERROR();
 
+        // check_for_collisions<<<blocksPerGrid, threadsPerBlock>>>(particles);
+        // cudaDeviceSynchronize();
+        // CHECK_LAST_ERROR();
+        
         // std::cout << "Collision check done\n";
 
         move_particles_kernel<<<numBlocks_, threadsPerBlock_>>>(particles, states);
         cudaDeviceSynchronize();
-        CHECK_LAST_ERROR();
+        // CHECK_LAST_ERROR();
 
         // std::cout << "Movement done\n";
 
