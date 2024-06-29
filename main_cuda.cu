@@ -27,7 +27,7 @@ uint64_t gridHeight_host;
 uint64_t gridWidth_host;
 uint64_t cellSize_host;
 Particle *particles;
-uint64_t *cellStartIndices;
+__device__ uint64_t *cellStartIndices;
 
 #define CHECK_CUDA_ERROR(call)                                                \
     {                                                                         \
@@ -49,6 +49,13 @@ uint64_t *cellStartIndices;
         }                                                                     \
     }
 
+__device__ void normalizeGridPosition(int *gridX, int *gridY) {
+    if (*gridX >= gridWidth) *gridX = gridWidth - 1;
+    if (*gridY >= gridHeight) *gridY = gridHeight - 1;
+    if (*gridX < 0) *gridX = 0;
+    if (*gridY < 0) *gridY = 0;
+}
+
 __device__ int fromCelltoFlattenedIndex(int x, int y) {
     return gridWidth * y + x;
 }
@@ -67,15 +74,9 @@ __device__ int getCellLength(int index) {
     return cellStartIndices[index + 1] - cellStartIndices[index];
 }
 
-__device__ void normalizeGridPosition(int *gridX, int *gridY) {
-    if (*gridX >= gridWidth) *gridX = gridWidth - 1;
-    if (*gridY >= gridHeight) *gridY = gridHeight - 1;
-    if (*gridX < 0) *gridX = 0;
-    if (*gridY < 0) *gridY = 0;
-}
 
 
-__device__ void check_collisions(Particle* particles, gridX1, gridY1, gridX2, gridY2) {
+__device__ void check_collisions(Particle* particles, int gridX1, int gridY1, int gridX2, int gridY2) {
     int threshold = d_config.PARTICLE_RADIUS;
 
     int cell1 = fromCelltoFlattenedIndex(gridX1, gridY1);
@@ -84,8 +85,8 @@ __device__ void check_collisions(Particle* particles, gridX1, gridY1, gridX2, gr
     int length2 = getCellLength(cell2);
     int start1 = cellStartIndices[cell1];
     int start2 = cellStartIndices[cell2];
-    Particles* particles1 = &particles[start1];
-    Particles* particles2 = &particles[start2];
+    Particle* particles1 = &particles[start1];
+    Particle* particles2 = &particles[start2];
 
     for (int i = 0; i < length1; ++i) {
         Particle* p1 = &particles1[i];
@@ -173,7 +174,7 @@ __global__ void oddEvenSortKernel(Particle *d_array) {
                 int prevGridY = d_array[i - 1].y / cellSize;
 
                 if (i == 0 || (gridX != prevGridX && gridY != prevGridY)) {
-                    printf("Cell %llu starts at index %d\n", cellIndex, i);
+                    printf("Cell %d starts at index %llu\n", cellIndex, i);
                     cellStartIndices[cellIndex] = i;
                 }
             }
@@ -182,7 +183,7 @@ __global__ void oddEvenSortKernel(Particle *d_array) {
     }
 }
 
-__global__ void check_for_collisions(Particles *particles) {
+__global__ void check_for_collisions(Particle *particles) {
     uint64_t row = blockIdx.y * blockDim.y + threadIdx.y;
     uint64_t col = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -246,8 +247,8 @@ __global__ void move_particles_kernel(Particle *particles, curandState *states) 
     uint64_t end = ((idx + 1) * d_config.NUM_PARTICLES) / num_threads;
     for (uint64_t i = start; i < end; i++) { // move particles
         if (particles[i].walker) {
-            // particles[i].x = particles[i].x + 1 + (-2 * (curand(&states[idx]) % 2));
-            // particles[i].y = particles[i].y + 1 + (-2 * (curand(&states[idx]) % 2));
+            particles[i].x = particles[i].x + 1 + (-2 * (curand(&states[idx]) % 2));
+            particles[i].y = particles[i].y + 1 + (-2 * (curand(&states[idx]) % 2));
         }
         particles[i].next_particle = NULL;
     }
@@ -256,6 +257,11 @@ __global__ void move_particles_kernel(Particle *particles, curandState *states) 
 __global__ void init_particles_kernel(Particle *particles, curandState *states) {
     for (uint64_t i = 0; i < numBlocks_ * threadsPerBlock_; i++) {
         curand_init(d_config.SEED, i, 0, &states[i]);
+    }
+    // allocate space for cell start indices
+    cellStartIndices = (uint64_t *)malloc(gridHeight * gridWidth * sizeof(uint64_t));
+    for (int i = 0; i < gridHeight * gridWidth; i++) {
+        cellStartIndices[i] = 0;
     }
     for (uint64_t i = 0; i < d_config.NUM_PARTICLES; i++) {
         particles[i].id = i;
@@ -300,6 +306,8 @@ int main() {
     cudaDeviceSynchronize();
     CHECK_LAST_ERROR();
 
+    std::cout << "Initialization done\n";
+
     Particle *local_particles = (Particle *)malloc(config.NUM_PARTICLES * sizeof(Particle));
 
     auto start = std::chrono::high_resolution_clock::now();
@@ -308,12 +316,21 @@ int main() {
     while (1) {
         oddEvenSortKernel<<<numBlocks_, threadsPerBlock_>>>(particles);
         cudaDeviceSynchronize();
+        CHECK_LAST_ERROR();
 
-        check_for_collisions<<<blocksPerGrid, threadsPerBlock>>>(d_grid);
+        // std::cout << "Sorting done\n";
+
+        check_for_collisions<<<blocksPerGrid, threadsPerBlock>>>(particles);
         cudaDeviceSynchronize();
+        CHECK_LAST_ERROR();
+
+        // std::cout << "Collision check done\n";
 
         move_particles_kernel<<<numBlocks_, threadsPerBlock_>>>(particles, states);
         cudaDeviceSynchronize();
+        CHECK_LAST_ERROR();
+
+        // std::cout << "Movement done\n";
 
         auto end = std::chrono::high_resolution_clock::now();
         iteration++;

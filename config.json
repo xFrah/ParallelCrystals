@@ -1,13 +1,13 @@
 {
-    "screen_height": 2000,
-    "screen_width": 2000,
-    "num_particles": 10000000,
+    "screen_height": 1000,
+    "screen_width": 1000,
+    "num_particles": 10000,
     "num_threads": 4,
     "use_max_hardware_threads": true,
     "particle_radius": 5,
     "seed": 17,
     "network_port": 7000,
-    "cell_size": 100,
+    "cell_size": 10,
     "target_display_fps": 60,
-    "show_visually": false
+    "show_visually": true
 }
