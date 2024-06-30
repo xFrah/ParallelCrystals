@@ -66,14 +66,21 @@ Per la nostra simulazione abbiamo deciso di utilizzare i framework OpenMP e CUDA
 
 \section{Il nostro approccio}
 L'obiettivo che ci siamo preposti consiste nel permettere alle particelle di muoversi liberamente in qualsiasi punto dello spazio, indipendentemente dalla griglia menzionata nella consegna. Per questo motivo, nella nostra architettura, le particelle occupano una zona di memoria separata da quella della griglia. In quest'ultima, infatti, sono memorizzati solo i puntatori alle particelle. \\ Ci teniamo a sottolineare che la griglia è utilizzata esclusivamente come supporto per l'algoritmo e non è necessaria per l'esistenza delle particelle stesse.
-Per limitare notevolmente il numero di controlli necessari, abbiamo adottato approcci che includono memoization, caching e sfruttamento della località delle particelle.
+Per limitare notevolmente il numero di controlli necessari, abbiamo adottato approcci che includono memoization, caching e sfruttamento della località delle particelle. \\
+Tutte le implementazioni utilizzano il 100\% delle risorse hardware.
 
  
-
+\newpage
 \section{Architettura}
 Il nostro algoritmo è implementato tramite una matrice, le cui celle contengono una linked-list ciascuna.
 Così facendo evitiamo la pre-allocazione preventiva di spazio per ogni cella, impiegando invece gli struct delle particelle come nodi delle linked-list. Ad ogni particella nello spazio corrisponde una cella della griglia, a seconda delle coordinate. La griglia viene popolata e svuotata a ogni iterazione.
 Questa architettura ci consente di sfruttare la località delle particelle ed evitare controlli superflui.
+La grandezza della matrice varia a seconda del parametro "Cell size", che è la misura del lato delle celle.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\linewidth]{griglia.png}
+\end{figure}
 
 \newpage
 
@@ -105,6 +112,13 @@ Ordinare le celle in anticipo ci permette di eseguire questi processi una sola v
 \subsection{Verificare eventuali collisioni}
 Iteriamo sulle celle della matrice e, per ciascuna di esse, controlliamo le collisioni con le particelle presenti nelle celle adiacenti. L'algoritmo sviluppato per la verifica delle collisioni prende in input due celle alla volta, quindi iteriamo sulla matrice e per ogni cella eseguiamo l’algoritmo n volte (sulle celle circostanti), dove n dipende dal tipo di cella*. Grazie al fatto che le linked-list presenti nelle celle sono ordinate, l’algoritmo può operare con complessità lineare, sfruttando la pseudo-memoizzazione del passaggio precedente.
 
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\linewidth]{patterns.png}
+    \caption{Cell checking patterns}
+    \label{fig:enter-label}
+\end{figure}
+
 \begin{quote}
  * Per evitare controlli ridondanti, abbiamo sviluppato dei pattern che, a seconda del tipo di cella, determinano quali celle adiacenti devono essere controllate, evitando di verificare tutte e nove le celle circostanti.
 \end{quote}
@@ -112,6 +126,55 @@ Iteriamo sulle celle della matrice e, per ciascuna di esse, controlliamo le coll
 
 \subsection{Muovere le particelle}
 Iteriamo sull’array delle particelle ed in ogni struct cambiamo le coordinate di 1 pixel. La direzione è data da un random number generator.
+
+
+\section{Problemi e migliorie}
+Riteniamo che l'elemento meno efficiente del nostro algoritmo sia la necessità di svuotare e riempire nuovamente le liste collegate a ogni iterazione.
+Una possibile soluzione sarebbe evitare di resettare le linked list e spostare soltanto le particelle che hanno effettivamente cambiato cella.
+
+\newpage
+
+\section{Performance}
+Di seguito riportiamo le misuraizoni delle performance, con la dimensione delle celle e numero di particelle come parametri. Con alcune combinazioni di parametri si può notare come la versione single thread sia superiore alle versioni parallele. Attribuiamo questo fatto all'overhead causato dalla gestione dei thread, in combinazione con un numero ridotto di particelle.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\linewidth]{Figure_1.png}
+    \label{fig:enter-label}
+\end{figure}
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{cccc}
+        \hline
+        Particles & OpenMP (Cell Size 10) & CUDA (Cell Size 10) \\
+        \hline
+        1,000 & 13.3\% & 92.8\% \\
+        10,000 & 38.5\% & 95.2\% \\
+        100,000 & 73.3\% & 98.7\% \\
+        1,000,000 & 90.0\% & 99.2\% \\
+        \hline
+    \end{tabular}
+    \caption{Percentage improvement for cell size 10}
+    \label{tab:percentage_improvement_cell_size_10}
+\end{table}
+\begin{table}[H]
+    \centering
+    \begin{tabular}{cccc}
+        \hline
+        Particles & OpenMP (Cell Size 50) & CUDA (Cell Size 50) \\
+        \hline
+        1,000 & \leq 0.0\% & 38.9\% \\
+        10,000 & 0.0\% & 89.6\% \\
+        100,000 & 75.0\% & 94.7\% \\
+        1,000,000 & 87.5\% & 91.7\% \\
+        \hline
+    \end{tabular}
+    \caption{Percentage improvement for cell size 50}
+    \label{tab:percentage_improvement_cell_size_50}
+\end{table}
+
+
+
 
 \newpage
 \clearpage
