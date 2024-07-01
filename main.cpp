@@ -41,6 +41,8 @@ void reset_linked_lists() {
 
 /*
  * Questa funzione inserisce una particella in testa alla linked list.
+ * @param listHead: puntatore alla linked list
+ * @param newHead: nuova testa della linked list
  */
 void append_node(ListHead *listHead, Particle *newHead) {
     Particle *oldHead = listHead->head; // salviamo la vecchia testa
@@ -265,8 +267,10 @@ void print_linked_lists() {
  */
 void move_particles() {
     for (int i = 0; i < config.NUM_PARTICLES; i++) {
-        if (particles[i].walker) {                                     // se la particella è un walker, la muoviamo
-            particles[i].x = particles[i].x + 1 + (-2 * (rand() % 2)); // muoviamo la particella di 1 pixeL
+        // se la particella è un walker, la muoviamo
+        if (particles[i].walker) {
+            // muoviamo la particella di 1 pixeL
+            particles[i].x = particles[i].x + 1 + (-2 * (rand() % 2));
             particles[i].y = particles[i].y + 1 + (-2 * (rand() % 2));
         }
     }
@@ -294,7 +298,7 @@ void initializeGrid() {
     for (int i = 0; i < gridHeight; i++) {
         for (int j = 0; j < gridWidth; j++) {
             grid[i][j] = (ListHead *)malloc(sizeof(ListHead)); // allochiamo la memoria per la testa della linked list
-            grid[i][j]->head = NULL; // inizializziamo la testa della linked list a NULL
+            grid[i][j]->head = NULL;                           // inizializziamo la testa della linked list a NULL
         }
     }
     std::cout << "Initialized grid\n";
