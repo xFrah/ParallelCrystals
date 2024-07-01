@@ -148,6 +148,11 @@ void sort_single_cell_insertionSort() {
     }
 }
 
+/*
+ * Questa funzione controlla le collisioni tra due celle.
+ * Per ogni particella nella prima cella, controlla se collide con le particelle nella seconda cella.
+ * Se due particelle collidono, le fermiamo.
+ */
 void check_collisions(ListHead *cell1, ListHead *cell2) {
     Particle *p1 = cell1->head;
     Particle *pj = cell2->head;
@@ -159,7 +164,7 @@ void check_collisions(ListHead *cell1, ListHead *cell2) {
         }
 
         Particle *pk = pj;
-        while (pk != NULL && pk->x <= p1->x + threshold) {
+        while (pk != NULL && pk->x <= p1->x + threshold) { // controlliamo le particelle nella cella adiacente
             // controlliamo se le particelle collidono
             if (p1->walker != pk->walker && abs(p1->y - pk->y) <= threshold) {
                 // se collidono, le fermiamo
@@ -268,7 +273,7 @@ void move_particles() {
 }
 
 /*
- * Qusta funzione inizializza le particelle con valori casuali.
+ * Questa funzione inizializza le particelle con valori casuali.
  */
 void init_particles() {
     for (int i = 0; i < config.NUM_PARTICLES; i++) {
@@ -288,13 +293,16 @@ void init_particles() {
 void initializeGrid() {
     for (int i = 0; i < gridHeight; i++) {
         for (int j = 0; j < gridWidth; j++) {
-            grid[i][j] = (ListHead *)malloc(sizeof(ListHead));
+            grid[i][j] = (ListHead *)malloc(sizeof(ListHead)); // allochiamo la memoria per la testa della linked list
             grid[i][j]->head = NULL; // inizializziamo la testa della linked list a NULL
         }
     }
     std::cout << "Initialized grid\n";
 }
 
+/*
+ * Questa funzione alloca la memoria per le particelle e per la griglia.
+ */
 void allocate_memory() {
     grid = (ListHead ***)malloc(gridHeight * sizeof(ListHead **));
     for (int i = 0; i < gridHeight; ++i) {
