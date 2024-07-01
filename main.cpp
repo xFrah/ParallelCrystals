@@ -154,6 +154,9 @@ void sort_single_cell_insertionSort() {
  * Questa funzione controlla le collisioni tra due celle.
  * Per ogni particella nella prima cella, controlla se collide con le particelle nella seconda cella.
  * Se due particelle collidono, le fermiamo.
+ * 
+ * @param cell1: puntatore alla prima cella
+ * @param cell2: puntatore alla seconda cella
  */
 void check_collisions(ListHead *cell1, ListHead *cell2) {
     Particle *p1 = cell1->head;
