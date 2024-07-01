@@ -2,10 +2,16 @@
 from matplotlib import pyplot as plt
 
 
-particles = [1_000, 10_000, 100_000, 1_000_000, 10_000_000]
-cell_size_10 = [18000, 16500, 6200, 250, 4]
-cell_size_50 = [18000, 12500, 950, 6, None]
-cell_size_100 = [18000, 4300, 90, 0.5, None]
+particles = [1_000, 10_000, 100_000, 1_000_000]
+cuda_cell_size_10 = [18000, 16500, 6200, 250]
+cuda_cell_size_50 = [18000, 12500, 950, 6]
+# cuda_cell_size_100 = [18000, 4300, 90, 0.5]
+openmp_cell_size_10 = [1500, 1300, 300, 20]
+openmp_cell_size_50 = [1500, 1300, 200, 4]
+single_cell_size_10 = [1300, 800, 80, 2]
+single_cell_size_50 = [11000, 1300, 50, 0.5]
+# single_cell_size_100 = [17500, 1100, 20, 0.2]
+
 
 # Plotting
 plt.figure(figsize=(10, 6))
@@ -16,9 +22,14 @@ def plot_with_none(x, y, label):
     y_filtered = [y[i] for i in range(len(y)) if y[i] is not None]
     plt.plot(x_filtered, y_filtered, marker='o', label=label)
 
-plot_with_none(particles, cell_size_10, 'Cell size 10')
-plot_with_none(particles, cell_size_50, 'Cell size 50')
-plot_with_none(particles, cell_size_100, 'Cell size 100')
+plot_with_none(particles, cuda_cell_size_10, 'Cuda Cell size 10')
+plot_with_none(particles, cuda_cell_size_50, 'Cuda Cell size 50')
+# plot_with_none(particles, cuda_cell_size_100, 'Cuda Cell size 100')
+plot_with_none(particles, openmp_cell_size_10, 'OpenMP Cell size 10')
+plot_with_none(particles, openmp_cell_size_50, 'OpenMP Cell size 50')
+plot_with_none(particles, single_cell_size_10, 'Single Cell size 10')
+plot_with_none(particles, single_cell_size_50, 'Single Cell size 50')
+# plot_with_none(particles, single_cell_size_100, 'Single Cell size 100')
 
 plt.xscale('log')
 plt.yscale('log')
