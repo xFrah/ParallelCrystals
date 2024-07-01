@@ -1,3 +1,10 @@
+#include <iostream>
+#include <vector>
+#include <algorithm>
+#include <cstdlib>
+#include <ctime>
+#include <chrono>
+#include <cuda_runtime.h>
 #include <cooperative_groups.h>
 #include <cuda_runtime.h>
 #include <curand_kernel.h>
@@ -248,79 +255,113 @@ void allocate_memory() {
     CHECK_CUDA_ERROR(cudaMalloc(&states, numBlocks_ * threadsPerBlock_ * sizeof(curandState)));
 }
 
-int main() {
-    config = get_configuration();
-    cellSize_host = config.CELL_SIZE;
-    gridHeight_host = config.HEIGHT / cellSize_host;
-    gridWidth_host = config.WIDTH / cellSize_host;
+// CUDA kernel to modify arr2 based on arr1
+__global__ void modify_arr2(int *arr1, int *arr2, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        arr2[idx] += arr1[idx];
+    }
+}
 
-    allocate_memory();
+// CUDA kernel for the inner loop operations
+__global__ void swap_elements(int *arr1, int *arr2, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) {
+        if (arr1[i] == 1) {
+            // Skip if arr1[i] == 1
+            return;
+        }
+        for (int j = i; j > 0; j--) {
+            if (j == 0 || arr1[j - 1] == 1) {
+                if (arr2[j] < arr2[j - 1]) {
+                    // Swap elements
+                    int temp = arr2[j];
+                    arr2[j] = arr2[j - 1];
+                    arr2[j - 1] = temp;
 
-    int socket_holder;
-    if (config.SHOW_VISUALLY) {
-        std::cout << "Starting socket server on port " << config.PORT << "\n";
-        socket_holder = socket_server_start(config.PORT);
-        if (socket_holder < 0) {
-            std::cerr << "Failed to start socket server\n";
-            return -1;
+                    temp = arr1[j];
+                    arr1[j] = arr1[j - 1];
+                    arr1[j - 1] = temp;
+                } else {
+                    break;
+                }
+            }
         }
     }
+}
 
-    dim3 threadsPerBlock(16, 16);
-    dim3 blocksPerGrid((gridWidth_host + threadsPerBlock.x - 1) / threadsPerBlock.x,
-                       (gridHeight_host + threadsPerBlock.y - 1) / threadsPerBlock.y);
-    init_particles_kernel<<<1, 1>>>(particles, states);
-    cudaDeviceSynchronize();
-    CHECK_LAST_ERROR();
+void random_move(std::vector<int> &arr1, std::vector<int> &arr2) {
+    for (size_t i = 0; i < arr2.size(); ++i) {
+        arr1[i] = (rand() % 2 == 0) ? -1 : 1;
+        arr2[i] += arr1[i];
+    }
+}
 
-    std::cout << "Initialization done\n";
+int main() {
+    const int n = 10000;
+    const int iterations = 1000; // Number of iterations to measure performance
+    std::vector<int> arr2(n);
+    std::vector<int> arr1(n);
 
-    Particle *local_particles = (Particle *)malloc(config.NUM_PARTICLES * sizeof(Particle));
+    // Allocate device memory
+    int *d_arr1, *d_arr2;
+    cudaMalloc(&d_arr1, n * sizeof(int));
+    cudaMalloc(&d_arr2, n * sizeof(int));
+
+    // Initialize arr2 with random values and sort it
+    for (int i = 0; i < n; ++i) {
+        arr2[i] = rand() % 20 + 2;
+    }
+    std::sort(arr2.begin(), arr2.end());
 
     auto start = std::chrono::high_resolution_clock::now();
-    int iteration = 0;
 
-    thrust::device_ptr<Particle> dev_ptr(particles);
+    for (int iter = 0; iter < iterations; ++iter) {
+        random_move(arr1, arr2);
 
-    while (1) {
-        thrust::sort(dev_ptr, dev_ptr + config.NUM_PARTICLES, ParticleComparator());
+        // Copy data to device
+        cudaMemcpy(d_arr1, arr1.data(), n * sizeof(int), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_arr2, arr2.data(), n * sizeof(int), cudaMemcpyHostToDevice);
+
+        // Define block and grid sizes
+        int blockSize = 256;
+        int gridSize = (n + blockSize - 1) / blockSize;
+
+        // Launch kernel to modify arr2
+        modify_arr2<<<gridSize, blockSize>>>(d_arr1, d_arr2, n);
         cudaDeviceSynchronize();
-        // CHECK_LAST_ERROR();
 
-        // print_particles<<<1, 1>>>(particles);
-
-        // std::cout << "Sorting done\n";
-
-        // Check sorted array and initialize cell start indices
-        checkSortedAndInitializeCellStartIndices<<<numBlocks_, threadsPerBlock_>>>(particles);
+        // Launch kernel to perform the inner loop operations
+        swap_elements<<<gridSize, blockSize>>>(d_arr1, d_arr2, n);
         cudaDeviceSynchronize();
-        // CHECK_LAST_ERROR();
 
-        // check_for_collisions<<<blocksPerGrid, threadsPerBlock>>>(particles);
-        // cudaDeviceSynchronize();
-        // CHECK_LAST_ERROR();
-        
-        // std::cout << "Collision check done\n";
-
-        move_particles_kernel<<<numBlocks_, threadsPerBlock_>>>(particles, states);
-        cudaDeviceSynchronize();
-        // CHECK_LAST_ERROR();
-
-        // std::cout << "Movement done\n";
-
-        auto end = std::chrono::high_resolution_clock::now();
-        iteration++;
-        if (std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() >= 1000 / config.TARGET_DISPLAY_FPS) {
-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-            std::cout << "Iterations per second: " << iteration / (elapsed / 1000.0) << std::endl;
-            start = std::chrono::high_resolution_clock::now();
-            if (config.SHOW_VISUALLY) {
-                cudaMemcpy(local_particles, particles, config.NUM_PARTICLES * sizeof(Particle), cudaMemcpyDeviceToHost);
-                socket_server_send(socket_holder, local_particles, config.NUM_PARTICLES * sizeof(struct Particle));
-            }
-            iteration = 0;
-        }
+        // Copy results back to host
+        cudaMemcpy(arr1.data(), d_arr1, n * sizeof(int), cudaMemcpyDeviceToHost);
+        cudaMemcpy(arr2.data(), d_arr2, n * sizeof(int), cudaMemcpyDeviceToHost);
     }
+
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end - start;
+
+    double iterations_per_second = iterations / elapsed.count();
+
+    // Print results
+    for (int i = 0; i < n; ++i) {
+        std::cout << arr1[i] << " ";
+    }
+    std::cout << std::endl;
+
+    for (int i = 0; i < n; ++i) {
+        std::cout << arr2[i] << " ";
+    }
+    std::cout << std::endl;
+
+    // Free device memory
+    cudaFree(d_arr1);
+    cudaFree(d_arr2);
+
+    // Print results
+    std::cout << "Iterations per second: " << iterations_per_second << std::endl;
 
     return 0;
 }
